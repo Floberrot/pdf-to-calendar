@@ -159,18 +159,47 @@ def _line_bounds(long_edges: list[dict], name_top: float, name_bottom: float) ->
     return Band(top=max(e["top"] for e in above), bottom=min(e["top"] for e in below))
 
 
-_DAY_ABBR = r"(?:lun|mar|mer|jeu|ven|sam|dim)\.?"
-_DAY_FULL = r"(?:lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche)"
-_MONTH_ABBR = r"(?:janv|fevr|mars|avr|mai|juin|juil|aout|sept|oct|nov|dec)\.?"
-
-_DATE_PATTERN = re.compile(
-    rf"^(?:"
-    rf"{_DAY_ABBR}\s+\d{{1,2}}"
-    rf"|{_DAY_FULL}\s+\d{{1,2}}(?:\s+{_MONTH_ABBR})?"
-    rf"|\d{{1,2}}/\d{{1,2}}"
-    rf"|\d{{1,2}}\s+{_MONTH_ABBR}"
-    rf")$",
-    re.IGNORECASE,
+_DAY_NAMES = frozenset(
+    {
+        "lun",
+        "mar",
+        "mer",
+        "jeu",
+        "ven",
+        "sam",
+        "dim",
+        "lundi",
+        "mardi",
+        "mercredi",
+        "jeudi",
+        "vendredi",
+        "samedi",
+        "dimanche",
+    }
+)
+_MONTH_NAMES = frozenset(
+    {
+        "janv",
+        "janvier",
+        "fevr",
+        "fevrier",
+        "mars",
+        "avr",
+        "avril",
+        "mai",
+        "juin",
+        "juil",
+        "juillet",
+        "aout",
+        "sept",
+        "septembre",
+        "oct",
+        "octobre",
+        "nov",
+        "novembre",
+        "dec",
+        "decembre",
+    }
 )
 
 
@@ -179,25 +208,50 @@ def _fold_accents(text: str) -> str:
     return "".join(c for c in text if not unicodedata.combining(c))
 
 
-def _is_date_like(text: str) -> bool:
-    return bool(_DATE_PATTERN.match(_fold_accents(text).strip()))
+def _classify_date_token(word: str) -> str | None:
+    """Classe un mot isolé pour la détection de l'en-tête : jour, numéro de
+    jour (1-31), mois, année, date complète 'jj/mm', ou None. Composable,
+    plutôt qu'un motif figé, pour encaisser les variantes de format d'un
+    PDF à l'autre (mois abrégé ou complet, avec ou sans année...)."""
+    folded = _fold_accents(word).strip(".").lower()
+    if folded in _DAY_NAMES:
+        return "day"
+    if folded in _MONTH_NAMES:
+        return "month"
+    if re.fullmatch(r"\d{1,2}/\d{1,2}", folded):
+        return "slash_date"
+    if re.fullmatch(r"\d{1,2}", folded) and 1 <= int(folded) <= 31:
+        return "num"
+    if re.fullmatch(r"\d{4}", folded):
+        return "year"
+    return None
 
 
 def _date_windows_in_line(line: list[dict]) -> list[dict]:
-    """Fenêtres de mots adjacents (1 à 3) qui ressemblent à une date, sans chevauchement."""
+    """Fenêtres de mots adjacents qui forment une date : jour textuel
+    optionnel + numéro de jour + mois optionnel + année optionnelle, ou une
+    date 'jj/mm' isolée. Le numéro de jour est l'ancre ; le reste s'attache
+    autour, dans n'importe quelle combinaison présente."""
+    kinds = [_classify_date_token(w["text"]) for w in line]
     matches = []
-    used: set[int] = set()
+    i = 0
     n = len(line)
-    for length in (3, 2, 1):
-        for start in range(n - length + 1):
-            span_range = range(start, start + length)
-            if any(i in used for i in span_range):
-                continue
-            span = line[start : start + length]
-            text = " ".join(w["text"] for w in span)
-            if _is_date_like(text):
-                matches.append(_window_bbox(span))
-                used.update(span_range)
+    while i < n:
+        if kinds[i] == "slash_date":
+            matches.append(_window_bbox([line[i]]))
+            i += 1
+            continue
+        if kinds[i] == "num":
+            start = i - 1 if i > 0 and kinds[i - 1] == "day" else i
+            end = i
+            if end + 1 < n and kinds[end + 1] == "month":
+                end += 1
+                if end + 1 < n and kinds[end + 1] == "year":
+                    end += 1
+            matches.append(_window_bbox(line[start : end + 1]))
+            i = end + 1
+            continue
+        i += 1
     return matches
 
 

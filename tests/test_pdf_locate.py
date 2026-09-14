@@ -119,6 +119,34 @@ def test_locate_scanned_pdf_has_no_text(tmp_path):
     assert result.reason == "pdf_scanne"
 
 
+def test_locate_handles_full_day_month_year_dates(tmp_path):
+    """Format réel observé : 'lundi 14 septembre 2026' (jour + numéro + mois
+    complet + année, 4 mots) plutôt que l'abrégé 'Lun 15' du plan."""
+    pdf_path = tmp_path / "planning.pdf"
+    dates = [
+        "lundi 14 septembre 2026",
+        "mardi 15 septembre 2026",
+        "mercredi 16 septembre 2026",
+    ]
+    c = canvas.Canvas(str(pdf_path), pagesize=PAGE_SIZE)
+    top = PAGE_SIZE[1] - 60
+    for i, date_text in enumerate(dates):
+        c.drawString(LEFT + i * 220, top, date_text)
+    y = top - 15
+    c.line(LEFT, y, RIGHT, y)
+    for name in NAMES:
+        y -= ROW_HEIGHT
+        c.drawString(LEFT, y + 12, name)
+        c.line(LEFT, y, RIGHT, y)
+    c.showPage()
+    c.save()
+
+    result = locate(str(pdf_path), candidates=["BERNARD PAUL"])
+
+    assert isinstance(result, LocateResult)
+    assert result.header.top < result.header.bottom
+
+
 def test_locate_few_dates_falls_back(tmp_path):
     pdf_path = tmp_path / "planning.pdf"
     _build_planning_pdf(pdf_path, names=NAMES, dates=["Lun 15", "Mar 16"])
