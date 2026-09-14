@@ -22,7 +22,7 @@ def test_compose_crop_stacks_header_above_line(tmp_path):
     result = LocateResult(
         page_index=0,
         table_left=0,
-        table_right=300 / SCALE,
+        table_right=100 / SCALE,
         header=Band(top=0, bottom=50 / SCALE),
         line=Band(top=150 / SCALE, bottom=200 / SCALE),
         matched_text="TEST",
