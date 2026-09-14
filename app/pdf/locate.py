@@ -127,7 +127,7 @@ def _search_name(pages_words: list[list[dict]], candidate: str) -> list[_NameMat
         for line in _group_lines(words):
             n = len(line)
             for length in (1, 2, 3):
-                for start in range(0, n - length + 1):
+                for start in range(n - length + 1):
                     span = line[start : start + length]
                     text = " ".join(w["text"] for w in span)
                     if normalize(text) == target:
@@ -193,7 +193,7 @@ def _date_windows_in_line(line: list[dict]) -> list[dict]:
     used: set[int] = set()
     n = len(line)
     for length in (3, 2, 1):
-        for start in range(0, n - length + 1):
+        for start in range(n - length + 1):
             span_range = range(start, start + length)
             if any(i in used for i in span_range):
                 continue
