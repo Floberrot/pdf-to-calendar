@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]      # requis pour que « Wait for CI » apparaisse côté Railway
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv python install 3.12
+      - run: uv sync --frozen
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run pytest -q
+
+  docker:
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t planning:ci .
+      - name: Smoke test
+        run: |
+          docker run -d --name app -p 8000:8000 \
+            -e PORT=8000 -e DATA_DIR=/tmp \
+            -e GOOGLE_CLIENT_ID=x -e GOOGLE_CLIENT_SECRET=x -e SESSION_SECRET=x \
+            -e ALLOWED_EMAILS=a@b.c -e ADMIN_EMAILS=a@b.c -e CALENDAR_ID=x \
+            -e GOOGLE_SERVICE_ACCOUNT_JSON='{}' -e LLM_API_KEY=x -e LLM_MODEL=x \
+            -e TZ=Europe/Paris -e VALIDATION_WEEKS=8 \
+            planning:ci
+          for i in $(seq 1 20); do
+            curl -fsS http://localhost:8000/health && exit 0
+            sleep 1
+          done
+          docker logs app
+          exit 1

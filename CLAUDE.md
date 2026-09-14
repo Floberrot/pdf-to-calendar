@@ -7,6 +7,8 @@ Application décrite dans `docs/plan-v4.md`. Le plan fait autorité : en cas de 
 ## Façon de travailler
 
 - Jamais de commit direct sur `main`. Une branche par lot de travail, une PR (`gh pr create`). Merge avec `gh pr merge --squash --delete-branch` seulement quand `gh pr checks` est vert.
+- Nom de branche en lien avec la feature/issue/bugfix, conventions GitHub : `feature/...`, `fix/...`, `chore/...`, `docs/...` (ex. `feature/phase1-socle`, `fix/pytest-pythonpath`).
+- Commits au format [Conventional Commits](https://www.conventionalcommits.org/) : `feat: ...`, `fix: ...`, `chore: ...`, `docs: ...`, `refactor: ...`, `test: ...`, `ci: ...`. Un commit = un changement cohérent.
 - Avant chaque commit : `uv run ruff format . && uv run ruff check . && uv run pytest -q`.
 - Petites PR, une par phase au plus. Dans la description : ce qui est testé, ce qui ne l'est pas, ce que l'humain doit faire ensuite.
 - Si une décision du plan est impossible ou mauvaise, ne pas contourner en silence : l'écrire dans la PR et proposer une alternative.

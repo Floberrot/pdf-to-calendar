@@ -1,0 +1,31 @@
+[project]
+name = "planning-agenda"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+  "fastapi",
+  "uvicorn[standard]",
+  "jinja2",
+  "python-multipart",
+  "itsdangerous",
+  "authlib",
+  "httpx",
+  "pdfplumber",
+  "pypdfium2",
+  "pillow",
+  "google-api-python-client",
+  "google-auth",
+]
+
+[dependency-groups]
+dev = ["pytest", "ruff", "reportlab"]
+
+[tool.uv]
+package = false
+
+[tool.ruff]
+line-length = 100
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
