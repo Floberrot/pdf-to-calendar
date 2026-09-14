@@ -16,12 +16,14 @@ from app.auth import CurrentUser, RedirectToLogin, require_admin, require_user
 from app.auth import router as auth_router
 from app.db import init_db, purge_old_imports
 from app.settings import settings
+from app.upload import router as upload_router
 
 logger = logging.getLogger("app")
 
 app = FastAPI(title="Planning → Agenda")
 app.add_middleware(SessionMiddleware, secret_key=settings.session_secret)
 app.include_router(auth_router)
+app.include_router(upload_router)
 
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 

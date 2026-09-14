@@ -83,6 +83,8 @@ Une variable à changer se modifie dans Railway, qui redéploie.
 
 ## Structure
 
-Voir section 9 du plan. `app/db.py` (connexion SQLite, schéma) n'y est pas
-listé explicitement ; ajouté pour partager la même connexion entre
-`log.py` et `auth.py`.
+Voir section 9 du plan. Deux modules n'y sont pas listés explicitement :
+
+- `app/db.py` : connexion SQLite (schéma, tables) partagée entre `log.py` et `auth.py`
+- `app/upload.py` : routes de dépôt du PDF, orchestration `locate` → `crop`,
+  écrans de secours (nom à préciser, recadrage manuel)

@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}Recadrage manuel{% endblock %}
+{% block content %}
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.6.2/cropper.min.css">
+<h1>Trace un rectangle autour de l'en-tête et de ta ligne</h1>
+
+{% if page_count > 1 %}
+<p>
+  Page {{ page_number }} / {{ page_count }}
+  {% if page_number > 1 %} · <a href="/upload/{{ upload_id }}/manual?page={{ page_number - 1 }}">précédente</a>{% endif %}
+  {% if page_number < page_count %} · <a href="/upload/{{ upload_id }}/manual?page={{ page_number + 1 }}">suivante</a>{% endif %}
+</p>
+{% endif %}
+
+<div style="max-width: 900px;">
+  <img id="crop-image" src="/upload/{{ upload_id }}/image/page_{{ page_number }}.png" style="max-width: 100%;">
+</div>
+
+<form id="crop-form" action="/upload/{{ upload_id }}/manual" method="post">
+  <input type="hidden" name="page" value="{{ page_number }}">
+  <input type="hidden" name="x" id="crop-x">
+  <input type="hidden" name="y" id="crop-y">
+  <input type="hidden" name="w" id="crop-w">
+  <input type="hidden" name="h" id="crop-h">
+  <button type="submit">Valider le recadrage</button>
+</form>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.6.2/cropper.min.js"></script>
+<script>
+  const image = document.getElementById("crop-image");
+  const cropper = new Cropper(image, {
+    viewMode: 1,
+    autoCropArea: 0.5,
+    ready() {
+      {% if last_crop and last_crop.page == page_number - 1 %}
+      cropper.setData({
+        x: {{ last_crop.x }},
+        y: {{ last_crop.y }},
+        width: {{ last_crop.w }},
+        height: {{ last_crop.h }},
+      });
+      {% endif %}
+    },
+  });
+
+  document.getElementById("crop-form").addEventListener("submit", () => {
+    const data = cropper.getData();
+    document.getElementById("crop-x").value = data.x;
+    document.getElementById("crop-y").value = data.y;
+    document.getElementById("crop-w").value = data.width;
+    document.getElementById("crop-h").value = data.height;
+  });
+</script>
+{% endblock %}
