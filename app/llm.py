@@ -8,7 +8,7 @@ pouvoir changer de fournisseur sans toucher aux appelants.
 from __future__ import annotations
 
 import json
-from datetime import date
+from datetime import UTC, datetime
 from typing import Any, Protocol
 
 from google import genai
@@ -52,7 +52,7 @@ def extract(image_png: bytes, *, client: _Client | None = None) -> dict:
     `client` : injection pour les tests (fournisseur factice, section 13 du
     plan) ; sans lui, construit le vrai client Gemini.
     """
-    prompt = _PROMPT_TEMPLATE.format(today=date.today().isoformat())
+    prompt = _PROMPT_TEMPLATE.format(today=datetime.now(UTC).date().isoformat())
     try:
         if client is None:
             client = genai.Client(api_key=settings.llm_api_key)
@@ -69,7 +69,7 @@ def extract(image_png: bytes, *, client: _Client | None = None) -> dict:
             ),
         )
         data = json.loads(response.text)
-    except Exception as exc:  # noqa: BLE001 - API externe, type d'erreur non garanti
+    except Exception as exc:
         raise ExtractError(f"Appel au modèle échoué : {exc}") from exc
 
     if not isinstance(data, dict) or "periode" not in data or "creneaux" not in data:

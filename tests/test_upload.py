@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from datetime import date, timedelta
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
@@ -27,7 +27,7 @@ def client():
 def _fake_extraction_payload() -> dict:
     """Dates relatives à aujourd'hui, pour rester dans la fenêtre de
     validation quel que soit le jour où la CI s'exécute."""
-    today = date.today()
+    today = datetime.now(UTC).date()
     creneau_date = today + timedelta(days=1)
     periode_fin = today + timedelta(days=6)
     return {
@@ -149,7 +149,7 @@ def test_upload_pdf_extraction_failure_shows_error_message(client, tmp_path):
 
 def test_upload_pdf_validation_failure_shows_error_message(client, tmp_path):
     def _bad_periode_extractor(image_png: bytes) -> dict:
-        today = date.today()
+        today = datetime.now(UTC).date()
         return {
             "periode": {
                 "debut": today.isoformat(),
