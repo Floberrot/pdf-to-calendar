@@ -67,6 +67,12 @@ def build_candidates(*, pdf_name: str | None, family_name: str, given_name: str)
         return [pdf_name]
 
     family = family_name.strip()
+    if not family:
+        # Les 5 gabarits ci-dessous contiennent tous le nom de famille : sans
+        # lui, pas de candidat plutôt qu'une recherche sur le seul prénom, qui
+        # risquerait de matcher quelqu'un d'autre (risque n°1 du plan).
+        return []
+
     given = given_name.strip()
     initial = given[:1] if given else ""
 
