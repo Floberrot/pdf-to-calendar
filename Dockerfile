@@ -10,4 +10,7 @@ RUN uv sync --frozen --no-dev --no-install-project
 COPY app ./app
 
 # Pas d'utilisateur non-root : le volume Railway est monté root, et l'app est mono-tenant.
-CMD ["sh", "-c", "/app/.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+# --proxy-headers --forwarded-allow-ips='*' : Railway termine le TLS à son edge et
+# transmet en HTTP en interne ; sans ça, Uvicorn ignore X-Forwarded-Proto et
+# request.url_for() génère des URL en http:// (casse la redirection OAuth Google).
+CMD ["sh", "-c", "/app/.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --proxy-headers --forwarded-allow-ips='*'"]
