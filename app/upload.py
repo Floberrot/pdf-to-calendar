@@ -10,6 +10,7 @@ import shutil
 import tempfile
 import time
 import uuid
+from collections.abc import Callable
 from pathlib import Path
 from typing import Annotated
 
@@ -18,10 +19,14 @@ from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from app.auth import CurrentUser, require_user
+from app.calendar_sync import ExistingEvent, list_existing_events
 from app.db import get_last_crop, get_pdf_name, set_last_crop, set_pdf_name
+from app.llm import ExtractError, extract
 from app.pdf.crop import compose_crop, crop_manual
 from app.pdf.locate import LocateResult, build_candidates, locate
 from app.pdf.render import render_pages
+from app.settings import settings
+from app.validate import ValidationError, validate
 
 router = APIRouter(prefix="/upload", tags=["upload"])
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
@@ -32,6 +37,30 @@ UPLOAD_MAX_AGE_SECONDS = 30 * 60
 BASE_UPLOAD_DIR = Path(tempfile.gettempdir()) / "pdf-to-calendar-uploads"
 
 NAME_RETRY_REASONS = {"nom_introuvable", "nom_homonyme"}
+
+ERROR_MESSAGES = {
+    "extraction_echouee": (
+        "Le modèle n'a pas réussi à lire l'image. Réessaie ou recadre à la main."
+    ),
+    "periode_invalide": "La période renvoyée par le modèle est invalide.",
+    "periode_trop_longue": (
+        "La période détectée dépasse 6 semaines : la découpe est probablement mauvaise."
+    ),
+    "periode_hors_fenetre": "La période détectée est trop loin dans le passé ou le futur.",
+    "creneau_invalide": "Un créneau renvoyé par le modèle est invalide.",
+    "creneau_hors_periode": "Un créneau détecté tombe en dehors de la période de l'en-tête.",
+    "creneau_duree_invalide": "Un créneau détecté dure moins d'1 h ou plus de 14 h.",
+}
+
+
+def get_extractor() -> Callable[..., dict]:
+    """Point d'injection pour les tests (fournisseur factice)."""
+    return extract
+
+
+def get_calendar_lister() -> Callable[..., list[ExistingEvent]]:
+    """Point d'injection pour les tests (client agenda factice)."""
+    return list_existing_events
 
 
 def _purge_old_uploads() -> None:
@@ -86,21 +115,73 @@ def _save_pdf_name_if_new(
         set_pdf_name(user.email, candidate_used)
 
 
+def _build_preview(
+    request: Request,
+    user: CurrentUser,
+    upload_id: str,
+    composed_path: Path,
+    *,
+    matched_text: str | None,
+    extractor: Callable[..., dict],
+    calendar_lister: Callable[..., list[ExistingEvent]],
+):
+    """Appelle le modèle puis la validation locale (plan, sections 5C/5D),
+    et liste les événements que la validation à venir (Phase 4) remplacera."""
+    try:
+        raw = extractor(composed_path.read_bytes())
+        extraction = validate(raw, validation_weeks=settings.validation_weeks)
+    except ExtractError:
+        extraction = ValidationError("extraction_echouee")
+
+    existing_events: list[ExistingEvent] | None = None
+    error_message = None
+    if isinstance(extraction, ValidationError):
+        error_message = ERROR_MESSAGES[extraction.reason]
+        extraction = None
+    else:
+        try:
+            existing_events = calendar_lister(
+                user.email, extraction.periode_debut, extraction.periode_fin
+            )
+        except Exception:  # noqa: BLE001 - API externe, ne doit pas casser la prévisualisation
+            existing_events = None
+
+    return templates.TemplateResponse(
+        request,
+        "upload_result.html",
+        {
+            "user": user,
+            "upload_id": upload_id,
+            "matched_text": matched_text,
+            "extraction": extraction,
+            "error_message": error_message,
+            "existing_events": existing_events,
+        },
+    )
+
+
 def _result_response(
     request: Request,
     user: CurrentUser,
     upload_dir: Path,
     upload_id: str,
     result: LocateResult,
+    *,
+    extractor: Callable[..., dict],
+    calendar_lister: Callable[..., list[ExistingEvent]],
 ):
     pages = _page_paths(upload_dir)
     composed = compose_crop(pages[result.page_index], result)
     composed_path = upload_dir / "composed.png"
     composed.save(composed_path)
-    return templates.TemplateResponse(
+    return _build_preview(
         request,
-        "upload_result.html",
-        {"user": user, "upload_id": upload_id, "matched_text": result.matched_text},
+        user,
+        upload_id,
+        composed_path,
+        matched_text=result.matched_text,
+        extractor=extractor,
+        calendar_lister=calendar_lister,
     )
 
 
@@ -109,6 +190,8 @@ async def upload_pdf(
     request: Request,
     user: Annotated[CurrentUser, Depends(require_user)],
     file: Annotated[UploadFile, File()],
+    extractor: Annotated[Callable[..., dict], Depends(get_extractor)],
+    calendar_lister: Annotated[Callable[..., list[ExistingEvent]], Depends(get_calendar_lister)],
 ):
     content = await file.read()
     if len(content) > MAX_UPLOAD_BYTES:
@@ -140,7 +223,15 @@ async def upload_pdf(
 
     if isinstance(result, LocateResult):
         set_pdf_name(user.email, result.candidate_used)
-        return _result_response(request, user, upload_dir, upload_id, result)
+        return _result_response(
+            request,
+            user,
+            upload_dir,
+            upload_id,
+            result,
+            extractor=extractor,
+            calendar_lister=calendar_lister,
+        )
 
     if result.reason in NAME_RETRY_REASONS:
         return templates.TemplateResponse(
@@ -177,6 +268,8 @@ def retry_with_name(
     user: Annotated[CurrentUser, Depends(require_user)],
     upload_id: str,
     pdf_name: Annotated[str, Form()],
+    extractor: Annotated[Callable[..., dict], Depends(get_extractor)],
+    calendar_lister: Annotated[Callable[..., list[ExistingEvent]], Depends(get_calendar_lister)],
 ):
     upload_dir = _upload_dir(request, upload_id)
     pdf_path = upload_dir / "source.pdf"
@@ -186,7 +279,15 @@ def retry_with_name(
 
     if isinstance(result, LocateResult):
         _save_pdf_name_if_new(user, result.candidate_used, pdf_name)
-        return _result_response(request, user, upload_dir, upload_id, result)
+        return _result_response(
+            request,
+            user,
+            upload_dir,
+            upload_id,
+            result,
+            extractor=extractor,
+            calendar_lister=calendar_lister,
+        )
 
     return RedirectResponse(url=f"/upload/{upload_id}/manual", status_code=303)
 
@@ -225,6 +326,8 @@ def manual_crop_submit(
     y: Annotated[float, Form()],
     w: Annotated[float, Form()],
     h: Annotated[float, Form()],
+    extractor: Annotated[Callable[..., dict], Depends(get_extractor)],
+    calendar_lister: Annotated[Callable[..., list[ExistingEvent]], Depends(get_calendar_lister)],
 ):
     upload_dir = _upload_dir(request, upload_id)
     pages = _page_paths(upload_dir)
@@ -237,10 +340,14 @@ def manual_crop_submit(
     composed_path = upload_dir / "composed.png"
     cropped.save(composed_path)
 
-    return templates.TemplateResponse(
+    return _build_preview(
         request,
-        "upload_result.html",
-        {"user": user, "upload_id": upload_id, "matched_text": None},
+        user,
+        upload_id,
+        composed_path,
+        matched_text=None,
+        extractor=extractor,
+        calendar_lister=calendar_lister,
     )
 
 
