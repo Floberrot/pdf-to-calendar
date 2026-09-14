@@ -4,7 +4,51 @@
 <h1>Voici ce qui a été trouvé</h1>
 {% if matched_text %}<p>Ligne trouvée : <strong>{{ matched_text }}</strong></p>{% endif %}
 <img src="/upload/{{ upload_id }}/image/composed.png" style="max-width: 100%; border: 1px solid #ccc;">
-<p>L'extraction des créneaux par le modèle arrive dans une prochaine étape (Phase 3).</p>
+
+{% if error_message %}
+<p><strong>{{ error_message }}</strong></p>
+{% elif extraction %}
+<h2>
+  Créneaux détectés du {{ extraction.periode_debut.strftime("%d/%m/%Y") }}
+  au {{ extraction.periode_fin.strftime("%d/%m/%Y") }}
+</h2>
+{% if extraction.creneaux %}
+<table>
+  <thead>
+    <tr><th>Date</th><th>Début</th><th>Fin</th><th>Lieu</th><th>Durée</th></tr>
+  </thead>
+  <tbody>
+    {% for creneau in extraction.creneaux %}
+    <tr>
+      <td>{{ creneau.date.strftime("%d/%m/%Y") }}</td>
+      <td>{{ creneau.debut }}</td>
+      <td>{{ creneau.fin }}</td>
+      <td>{{ creneau.lieu }}</td>
+      <td>{{ creneau.duration_hours }} h</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p>Aucun créneau de travail sur cette période (semaine de repos).</p>
+{% endif %}
+
+<h2>Anciens événements sur cette période</h2>
+{% if existing_events is none %}
+<p>Impossible de vérifier les anciens événements pour l'instant.</p>
+{% elif existing_events %}
+<p>{{ existing_events | length }} événement(s) déjà importé(s), qui seront remplacés à la
+  validation (bouton pas encore disponible, Phase 4) :</p>
+<ul>
+  {% for event in existing_events %}
+  <li>{{ event.summary }} ({{ event.start }} → {{ event.end }})</li>
+  {% endfor %}
+</ul>
+{% else %}
+<p>Aucun événement déjà importé sur cette période.</p>
+{% endif %}
+{% endif %}
+
 <p>Ce n'est pas la bonne ligne ?</p>
 <p>
   <a href="/upload/{{ upload_id }}/name">Changer le nom recherché</a> ·

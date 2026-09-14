@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from datetime import date, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
@@ -8,7 +9,10 @@ from reportlab.lib.pagesizes import A4, landscape
 from reportlab.pdfgen import canvas
 
 from app.auth import CurrentUser, require_user
+from app.calendar_sync import ExistingEvent
+from app.llm import ExtractError
 from app.main import app
+from app.upload import ERROR_MESSAGES, get_calendar_lister, get_extractor
 
 PAGE_SIZE = landscape(A4)
 
@@ -20,6 +24,28 @@ def client():
     app.dependency_overrides.clear()
 
 
+def _fake_extraction_payload() -> dict:
+    """Dates relatives à aujourd'hui, pour rester dans la fenêtre de
+    validation quel que soit le jour où la CI s'exécute."""
+    today = date.today()
+    creneau_date = today + timedelta(days=1)
+    periode_fin = today + timedelta(days=6)
+    return {
+        "periode": {"debut": today.isoformat(), "fin": periode_fin.isoformat()},
+        "creneaux": [
+            {"date": creneau_date.isoformat(), "debut": "09:00", "fin": "17:00", "lieu": "Site B"}
+        ],
+    }
+
+
+def _default_extractor(image_png: bytes) -> dict:
+    return _fake_extraction_payload()
+
+
+def _default_calendar_lister(email, periode_debut, periode_fin) -> list[ExistingEvent]:
+    return []
+
+
 def _override_user(*, given_name: str = "Sophie", family_name: str = "MARTIN") -> None:
     app.dependency_overrides[require_user] = lambda: CurrentUser(
         email="ami@example.com",
@@ -28,6 +54,8 @@ def _override_user(*, given_name: str = "Sophie", family_name: str = "MARTIN") -
         given_name=given_name,
         family_name=family_name,
     )
+    app.dependency_overrides[get_extractor] = lambda: _default_extractor
+    app.dependency_overrides[get_calendar_lister] = lambda: _default_calendar_lister
 
 
 def _build_planning_pdf(path) -> None:
@@ -61,6 +89,102 @@ def test_upload_pdf_success_shows_composed_result(client, tmp_path):
 
     assert response.status_code == 200
     assert "MARTIN Sophie" in response.text
+
+
+def test_upload_pdf_success_shows_creneaux_table(client, tmp_path):
+    """Plan section 5E : les créneaux détectés en tableau sur la prévisualisation."""
+    _override_user(given_name="Sophie", family_name="MARTIN")
+    pdf_path = tmp_path / "planning.pdf"
+    _build_planning_pdf(pdf_path)
+
+    with open(pdf_path, "rb") as f:
+        response = client.post("/upload", files={"file": ("planning.pdf", f, "application/pdf")})
+
+    assert response.status_code == 200
+    assert "09:00" in response.text
+    assert "17:00" in response.text
+    assert "Site B" in response.text
+
+
+def test_upload_pdf_shows_existing_events_to_be_replaced(client, tmp_path):
+    """Plan section 5E : les anciens créneaux qui seront remplacés."""
+
+    def _lister_with_one_event(email, periode_debut, periode_fin):
+        return [
+            ExistingEvent(
+                id="evt1",
+                summary="Sophie Martin — 8h-16h",
+                start="2026-09-15T08:00:00+02:00",
+                end="2026-09-15T16:00:00+02:00",
+            )
+        ]
+
+    _override_user(given_name="Sophie", family_name="MARTIN")
+    app.dependency_overrides[get_calendar_lister] = lambda: _lister_with_one_event
+    pdf_path = tmp_path / "planning.pdf"
+    _build_planning_pdf(pdf_path)
+
+    with open(pdf_path, "rb") as f:
+        response = client.post("/upload", files={"file": ("planning.pdf", f, "application/pdf")})
+
+    assert response.status_code == 200
+    assert "Sophie Martin — 8h-16h" in response.text
+
+
+def test_upload_pdf_extraction_failure_shows_error_message(client, tmp_path):
+    def _broken_extractor(image_png: bytes) -> dict:
+        raise ExtractError("panne simulée")
+
+    _override_user(given_name="Sophie", family_name="MARTIN")
+    app.dependency_overrides[get_extractor] = lambda: _broken_extractor
+    pdf_path = tmp_path / "planning.pdf"
+    _build_planning_pdf(pdf_path)
+
+    with open(pdf_path, "rb") as f:
+        response = client.post("/upload", files={"file": ("planning.pdf", f, "application/pdf")})
+
+    assert response.status_code == 200
+    assert ERROR_MESSAGES["extraction_echouee"] in response.text
+
+
+def test_upload_pdf_validation_failure_shows_error_message(client, tmp_path):
+    def _bad_periode_extractor(image_png: bytes) -> dict:
+        today = date.today()
+        return {
+            "periode": {
+                "debut": today.isoformat(),
+                "fin": (today + timedelta(weeks=10)).isoformat(),
+            },
+            "creneaux": [],
+        }
+
+    _override_user(given_name="Sophie", family_name="MARTIN")
+    app.dependency_overrides[get_extractor] = lambda: _bad_periode_extractor
+    pdf_path = tmp_path / "planning.pdf"
+    _build_planning_pdf(pdf_path)
+
+    with open(pdf_path, "rb") as f:
+        response = client.post("/upload", files={"file": ("planning.pdf", f, "application/pdf")})
+
+    assert response.status_code == 200
+    assert ERROR_MESSAGES["periode_trop_longue"] in response.text
+
+
+def test_upload_pdf_calendar_lookup_failure_falls_back_gracefully(client, tmp_path):
+    def _broken_lister(email, periode_debut, periode_fin):
+        raise RuntimeError("agenda indisponible")
+
+    _override_user(given_name="Sophie", family_name="MARTIN")
+    app.dependency_overrides[get_calendar_lister] = lambda: _broken_lister
+    pdf_path = tmp_path / "planning.pdf"
+    _build_planning_pdf(pdf_path)
+
+    with open(pdf_path, "rb") as f:
+        response = client.post("/upload", files={"file": ("planning.pdf", f, "application/pdf")})
+
+    assert response.status_code == 200
+    assert "Impossible de vérifier les anciens événements" in response.text
+    assert "09:00" in response.text
 
 
 def test_change_searched_name_form_available_after_success(client, tmp_path):
