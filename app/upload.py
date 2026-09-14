@@ -157,6 +157,20 @@ async def upload_pdf(
     return RedirectResponse(url=f"/upload/{upload_id}/manual", status_code=303)
 
 
+@router.get("/{upload_id}/name")
+def name_form(
+    request: Request,
+    user: Annotated[CurrentUser, Depends(require_user)],
+    upload_id: str,
+):
+    _upload_dir(request, upload_id)  # 404 si l'import n'existe pas/plus
+    return templates.TemplateResponse(
+        request,
+        "upload_name.html",
+        {"user": user, "upload_id": upload_id, "reason": None, "matches": ()},
+    )
+
+
 @router.post("/{upload_id}/name")
 def retry_with_name(
     request: Request,

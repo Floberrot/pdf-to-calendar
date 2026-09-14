@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 import pytest
 from fastapi.testclient import TestClient
 from reportlab.lib.pagesizes import A4, landscape
@@ -59,6 +61,29 @@ def test_upload_pdf_success_shows_composed_result(client, tmp_path):
 
     assert response.status_code == 200
     assert "MARTIN Sophie" in response.text
+
+
+def test_change_searched_name_form_available_after_success(client, tmp_path):
+    """Plan section 5E : bouton "Changer le nom recherché" sur la
+    prévisualisation, même quand l'automatique a réussi."""
+    _override_user(given_name="Sophie", family_name="MARTIN")
+    pdf_path = tmp_path / "planning.pdf"
+    _build_planning_pdf(pdf_path)
+    with open(pdf_path, "rb") as f:
+        upload_response = client.post(
+            "/upload", files={"file": ("planning.pdf", f, "application/pdf")}
+        )
+    assert "Changer le nom recherché" in upload_response.text
+
+    # upload_id n'est pas dans l'URL (pas de redirection sur un succès) ;
+    # on le lit dans le lien "Changer le nom recherché" du résultat.
+    match = re.search(r"/upload/([a-f0-9]+)/name", upload_response.text)
+    assert match is not None
+    upload_id = match.group(1)
+
+    name_form_response = client.get(f"/upload/{upload_id}/name")
+    assert name_form_response.status_code == 200
+    assert "Changer le nom recherché" in name_form_response.text
 
 
 def test_upload_pdf_name_not_found_shows_name_form(client, tmp_path):
