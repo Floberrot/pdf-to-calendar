@@ -144,7 +144,9 @@ def test_upload_pdf_extraction_failure_shows_error_message(client, tmp_path):
         response = client.post("/upload", files={"file": ("planning.pdf", f, "application/pdf")})
 
     assert response.status_code == 200
-    assert ERROR_MESSAGES["extraction_echouee"] in response.text
+    # Sous-chaine sans apostrophe : le message complet contient des apostrophes
+    # que Jinja echappe en &#39; dans le HTML rendu.
+    assert "Réessaie ou recadre à la main" in response.text
 
 
 def test_upload_pdf_validation_failure_shows_error_message(client, tmp_path):
