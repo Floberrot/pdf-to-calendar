@@ -7,6 +7,7 @@ connexion partagée entre `log.py` et `auth.py` (voir description de la PR).
 from __future__ import annotations
 
 import contextlib
+import json
 import sqlite3
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
@@ -82,4 +83,31 @@ def upsert_user_seen(email: str) -> None:
             ON CONFLICT(email) DO UPDATE SET last_seen = excluded.last_seen
             """,
             (email, now, now),
+        )
+
+
+def get_pdf_name(email: str) -> str | None:
+    with transaction() as conn:
+        row = conn.execute("SELECT pdf_name FROM users WHERE email = ?", (email,)).fetchone()
+    return row["pdf_name"] if row else None
+
+
+def set_pdf_name(email: str, pdf_name: str) -> None:
+    with transaction() as conn:
+        conn.execute("UPDATE users SET pdf_name = ? WHERE email = ?", (pdf_name, email))
+
+
+def get_last_crop(email: str) -> dict | None:
+    with transaction() as conn:
+        row = conn.execute("SELECT last_crop FROM users WHERE email = ?", (email,)).fetchone()
+    if row is None or row["last_crop"] is None:
+        return None
+    return json.loads(row["last_crop"])
+
+
+def set_last_crop(email: str, crop: dict) -> None:
+    with transaction() as conn:
+        conn.execute(
+            "UPDATE users SET last_crop = ? WHERE email = ?",
+            (json.dumps(crop), email),
         )

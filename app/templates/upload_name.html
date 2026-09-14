@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Préciser le nom{% endblock %}
+{% block content %}
+<h1>Ton nom n'a pas été trouvé automatiquement</h1>
+{% if reason == "nom_homonyme" %}
+<p>Plusieurs lignes correspondent : {{ matches | join(", ") }}. Tape une version
+plus précise (ex. « DUPONT J. » plutôt que « DUPONT »).</p>
+{% else %}
+<p>Ton nom n'apparaît pas tel quel dans le PDF. Tape-le exactement comme il est
+écrit dedans.</p>
+{% endif %}
+<form action="/upload/{{ upload_id }}/name" method="post">
+  <input type="text" name="pdf_name" required autofocus>
+  <button type="submit">Valider</button>
+</form>
+<p><a href="/upload/{{ upload_id }}/manual">Recadrer à la main à la place</a></p>
+{% endblock %}

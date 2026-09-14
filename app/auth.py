@@ -39,6 +39,8 @@ class CurrentUser:
     email: str
     name: str
     is_admin: bool
+    given_name: str = ""
+    family_name: str = ""
 
 
 def is_allowed(
@@ -86,7 +88,12 @@ async def auth_callback(request: Request):
         log(request_id=request_id, email=email, step="login", status="denied")
         raise HTTPException(status_code=403, detail="Accès refusé")
 
-    request.session["user"] = {"email": email, "name": name}
+    request.session["user"] = {
+        "email": email,
+        "name": name,
+        "given_name": userinfo.get("given_name") or "",
+        "family_name": userinfo.get("family_name") or "",
+    }
     upsert_user_seen(email)
     log(request_id=request_id, email=email, step="login", status="ok")
     return RedirectResponse(url="/")
@@ -105,7 +112,13 @@ def require_user(request: Request) -> CurrentUser:
     email = user["email"]
     if not is_allowed(email):
         raise HTTPException(status_code=403, detail="Accès refusé")
-    return CurrentUser(email=email, name=user.get("name") or email, is_admin=is_admin(email))
+    return CurrentUser(
+        email=email,
+        name=user.get("name") or email,
+        given_name=user.get("given_name") or "",
+        family_name=user.get("family_name") or "",
+        is_admin=is_admin(email),
+    )
 
 
 def require_admin(user: Annotated[CurrentUser, Depends(require_user)]) -> CurrentUser:
