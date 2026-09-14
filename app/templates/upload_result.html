@@ -5,7 +5,9 @@
 {% if matched_text %}<p>Ligne trouvée : <strong>{{ matched_text }}</strong></p>{% endif %}
 <img src="/upload/{{ upload_id }}/image/composed.png" style="max-width: 100%; border: 1px solid #ccc;">
 <p>L'extraction des créneaux par le modèle arrive dans une prochaine étape (Phase 3).</p>
+<p>Ce n'est pas la bonne ligne ?</p>
 <p>
+  <a href="/upload/{{ upload_id }}/name">Changer le nom recherché</a> ·
   <a href="/upload/{{ upload_id }}/manual">Recadrer à la main</a> ·
   <a href="/upload">Déposer un autre PDF</a>
 </p>
