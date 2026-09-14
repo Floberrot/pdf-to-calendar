@@ -7,7 +7,7 @@ une lecture globale, pour rester testable sans configuration.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Literal
 
 MAX_PERIODE_WEEKS = 6
@@ -48,8 +48,8 @@ class ValidationError:
 def _creneau_duration_hours(debut: str, fin: str) -> float:
     """Durée en heures ; si fin <= début, le créneau se termine le lendemain
     (ex. 21:00-07:00 = 10h)."""
-    start = datetime.strptime(debut, "%H:%M")
-    end = datetime.strptime(fin, "%H:%M")
+    start = datetime.strptime(debut, "%H:%M").replace(tzinfo=UTC)
+    end = datetime.strptime(fin, "%H:%M").replace(tzinfo=UTC)
     if end <= start:
         end += timedelta(days=1)
     return (end - start).total_seconds() / 3600
@@ -58,7 +58,7 @@ def _creneau_duration_hours(debut: str, fin: str) -> float:
 def validate(
     raw: dict, *, validation_weeks: int, today: date | None = None
 ) -> ValidatedExtraction | ValidationError:
-    today = today or date.today()
+    today = today or datetime.now(UTC).date()
 
     try:
         periode_debut = date.fromisoformat(raw["periode"]["debut"])
