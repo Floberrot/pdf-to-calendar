@@ -124,7 +124,7 @@ async def upload_pdf(
 
     try:
         pages = render_pages(pdf_path, upload_dir / "pages")
-    except Exception:
+    except Exception:  # noqa: BLE001 - fichier utilisateur non fiable, type d'erreur non garanti
         shutil.rmtree(upload_dir, ignore_errors=True)
         return templates.TemplateResponse(
             request, "upload.html", {"user": user, "error": "PDF illisible."}
