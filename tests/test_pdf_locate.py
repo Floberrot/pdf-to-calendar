@@ -170,3 +170,24 @@ def test_build_candidates_uses_pdf_name_only():
 def test_build_candidates_no_given_name():
     candidates = build_candidates(pdf_name=None, family_name="Dupont", given_name="")
     assert candidates == ["Dupont"]
+
+
+def test_build_candidates_no_family_name_returns_empty():
+    """Sans nom de famille, aucun candidat : chercher le seul prénom
+    risquerait de matcher un homonyme de prénom (risque n°1 du plan)."""
+    candidates = build_candidates(pdf_name=None, family_name="", given_name="Florian")
+    assert candidates == []
+
+
+def test_locate_without_family_name_never_matches_first_name_homonym(tmp_path):
+    """Deux personnes prénommées Florian dans le PDF : sans nom de famille,
+    ne doit jamais en choisir un au hasard (risque n°1 du plan)."""
+    pdf_path = tmp_path / "planning.pdf"
+    names = ["MARTIN Florian", "DUPONT Florian", "BERNARD Paul"]
+    _build_planning_pdf(pdf_path, names=names)
+
+    candidates = build_candidates(pdf_name=None, family_name="", given_name="Florian")
+    result = locate(str(pdf_path), candidates=candidates)
+
+    assert isinstance(result, LocateFailure)
+    assert result.reason == "nom_introuvable"
