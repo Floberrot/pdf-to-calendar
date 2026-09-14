@@ -33,9 +33,7 @@ class _FakeClient:
 def test_extract_returns_parsed_json():
     payload = {
         "periode": {"debut": "2026-09-14", "fin": "2026-09-20"},
-        "creneaux": [
-            {"date": "2026-09-15", "debut": "09:00", "fin": "17:30", "lieu": "Site B"}
-        ],
+        "creneaux": [{"date": "2026-09-15", "debut": "09:00", "fin": "17:30", "lieu": "Site B"}],
     }
     client = _FakeClient(json.dumps(payload))
 
