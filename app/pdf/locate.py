@@ -159,16 +159,48 @@ def _line_bounds(long_edges: list[dict], name_top: float, name_bottom: float) ->
     return Band(top=max(e["top"] for e in above), bottom=min(e["top"] for e in below))
 
 
-_DAY_NAMES = frozenset({
-    "lun", "mar", "mer", "jeu", "ven", "sam", "dim",
-    "lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche",
-})
-_MONTH_NAMES = frozenset({
-    "janv", "janvier", "fevr", "fevrier", "mars",
-    "avr", "avril", "mai", "juin", "juil", "juillet",
-    "aout", "sept", "septembre", "oct", "octobre",
-    "nov", "novembre", "dec", "decembre",
-})
+_DAY_NAMES = frozenset(
+    {
+        "lun",
+        "mar",
+        "mer",
+        "jeu",
+        "ven",
+        "sam",
+        "dim",
+        "lundi",
+        "mardi",
+        "mercredi",
+        "jeudi",
+        "vendredi",
+        "samedi",
+        "dimanche",
+    }
+)
+_MONTH_NAMES = frozenset(
+    {
+        "janv",
+        "janvier",
+        "fevr",
+        "fevrier",
+        "mars",
+        "avr",
+        "avril",
+        "mai",
+        "juin",
+        "juil",
+        "juillet",
+        "aout",
+        "sept",
+        "septembre",
+        "oct",
+        "octobre",
+        "nov",
+        "novembre",
+        "dec",
+        "decembre",
+    }
+)
 
 
 def _fold_accents(text: str) -> str:
