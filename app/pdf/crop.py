@@ -20,18 +20,22 @@ def compose_crop(page_image_path: Path, result: LocateResult) -> Image.Image:
         page_image.load()
         left = round(result.table_left * SCALE)
         right = round(result.table_right * SCALE)
-        header_crop = page_image.crop((
-            left,
-            round(result.header.top * SCALE),
-            right,
-            round(result.header.bottom * SCALE),
-        ))
-        line_crop = page_image.crop((
-            left,
-            round(result.line.top * SCALE),
-            right,
-            round(result.line.bottom * SCALE),
-        ))
+        header_crop = page_image.crop(
+            (
+                left,
+                round(result.header.top * SCALE),
+                right,
+                round(result.header.bottom * SCALE),
+            )
+        )
+        line_crop = page_image.crop(
+            (
+                left,
+                round(result.line.top * SCALE),
+                right,
+                round(result.line.bottom * SCALE),
+            )
+        )
 
     width = max(header_crop.width, line_crop.width)
     height = header_crop.height + line_crop.height

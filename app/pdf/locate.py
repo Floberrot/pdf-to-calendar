@@ -61,9 +61,7 @@ def normalize(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
-def build_candidates(
-    *, pdf_name: str | None, family_name: str, given_name: str
-) -> list[str]:
+def build_candidates(*, pdf_name: str | None, family_name: str, given_name: str) -> list[str]:
     """Candidats de nom, dans l'ordre (plan, section 5B-1)."""
     if pdf_name:
         return [pdf_name]
@@ -153,9 +151,7 @@ def _long_edges(edges: list[dict], page_width: float) -> list[dict]:
     return [e for e in edges if (e["x1"] - e["x0"]) >= min_length]
 
 
-def _line_bounds(
-    long_edges: list[dict], name_top: float, name_bottom: float
-) -> Band | None:
+def _line_bounds(long_edges: list[dict], name_top: float, name_bottom: float) -> Band | None:
     above = [e for e in long_edges if e["top"] <= name_top]
     below = [e for e in long_edges if e["top"] >= name_bottom]
     if not above or not below:
@@ -261,9 +257,7 @@ def locate(pdf_path: str, candidates: list[str]) -> LocateResult | LocateFailure
         if line is None:
             return LocateFailure("pas_de_traits")
 
-        words_above = [
-            w for w in pages_words[name_match.page_index] if w["bottom"] <= line.top
-        ]
+        words_above = [w for w in pages_words[name_match.page_index] if w["bottom"] <= line.top]
         header = _header_band(words_above, edges)
         if header is None:
             return LocateFailure("pas_de_dates")
