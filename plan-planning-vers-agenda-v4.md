@@ -318,7 +318,9 @@ Plus de `cryptography`, plus de `tools/diagnose_pdf.py` : `locate.py` est une fo
 
 **Phase 5 — Admin (½ j).** Tests de santé, journal.
 
-**≈ 4 jours.**
+**Phase 6 — Front (½ j).** Un CSS minimal sur les écrans existants (upload, prévisualisation, admin) : cohérent, aéré, lisible sur mobile. Pas de framework JS ni d'étape de build, dans l'esprit du reste de la stack (section 9) — quelque chose de propre et moderne sans complexifier l'existant.
+
+**≈ 4,5 jours.**
 
 ---
 
