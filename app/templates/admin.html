@@ -3,6 +3,45 @@
 {% block content %}
 <h1>Admin</h1>
 <p>Connecté en tant que {{ user.name }}.</p>
-<p>Tests de santé et journal des imports : à venir.</p>
+
+<h2>Tests de santé</h2>
+<p>
+  <form action="/admin/health/calendar" method="post" style="display: inline">
+    <button type="submit">Tester l'agenda</button>
+  </form>
+  <form action="/admin/health/model" method="post" style="display: inline">
+    <button type="submit">Tester le modèle</button>
+  </form>
+</p>
+{% if calendar_result %}<p>Agenda : {{ calendar_result }}</p>{% endif %}
+{% if model_result %}<p>Modèle : {{ model_result }}</p>{% endif %}
+
+<h2>Journal des imports</h2>
+<form action="/admin" method="get">
+  <input type="text" name="email" placeholder="Filtrer par email" value="{{ email_filter or '' }}">
+  <button type="submit">Filtrer</button>
+  {% if email_filter %}<a href="/admin">Réinitialiser</a>{% endif %}
+</form>
+<table>
+  <thead>
+    <tr><th>Date</th><th>Email</th><th>Étape</th><th>Statut</th><th>Détail</th></tr>
+  </thead>
+  <tbody>
+    {% for row in imports %}
+    <tr>
+      <td>{{ row.ts }}</td>
+      <td>{{ row.email }}</td>
+      <td>{{ row.step }}</td>
+      <td>{{ row.status }}</td>
+      <td>
+        {% if row.detail %}
+        <details><summary>voir</summary><pre>{{ row.detail }}</pre></details>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
 <p><a href="/">Retour à l'accueil</a></p>
 {% endblock %}

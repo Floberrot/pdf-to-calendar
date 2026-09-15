@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-from app.db import purge_old_imports, transaction, upsert_user_seen
+from app.db import list_recent_imports, purge_old_imports, transaction, upsert_user_seen
 from app.log import log
 
 
@@ -53,3 +53,31 @@ def test_purge_old_imports_removes_only_old_rows():
         ).fetchone()
     assert old is None
     assert recent is not None
+
+
+def test_list_recent_imports_orders_newest_first():
+    log(request_id="req-order-1", email="order-test@example.com", step="upload", status="ok")
+    log(request_id="req-order-2", email="order-test@example.com", step="locate", status="ok")
+
+    rows = list_recent_imports(email="order-test@example.com")
+
+    assert [row["request_id"] for row in rows] == ["req-order-2", "req-order-1"]
+
+
+def test_list_recent_imports_filters_by_email():
+    log(request_id="req-a", email="filter-a@example.com", step="upload", status="ok")
+    log(request_id="req-b", email="filter-b@example.com", step="upload", status="ok")
+
+    rows = list_recent_imports(email="filter-a@example.com")
+
+    assert all(row["email"] == "filter-a@example.com" for row in rows)
+    assert any(row["request_id"] == "req-a" for row in rows)
+
+
+def test_list_recent_imports_respects_limit():
+    for i in range(5):
+        log(request_id=f"req-limit-{i}", email="limit-test@example.com", step="upload", status="ok")
+
+    rows = list_recent_imports(email="limit-test@example.com", limit=2)
+
+    assert len(rows) == 2
