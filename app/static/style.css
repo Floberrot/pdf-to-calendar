@@ -169,6 +169,34 @@ button:disabled {
   cursor: not-allowed;
 }
 
+/* Chargement (extraction, ecriture agenda...) : etat visuel sur le bouton
+   soumis, pose par app.js. Purement decoratif, la soumission n'en dépend pas. */
+
+button.is-loading {
+  position: relative;
+  color: transparent;
+}
+
+button.is-loading::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 1rem;
+  height: 1rem;
+  margin: -0.5rem 0 0 -0.5rem;
+  border: 2px solid var(--accent-fg);
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 /* Regroupements de champs / actions */
 
 .field {
