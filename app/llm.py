@@ -43,6 +43,11 @@ class ExtractError(Exception):
     """Levée quand l'appel au modèle échoue ou renvoie un JSON inexploitable."""
 
 
+class RateLimitError(ExtractError):
+    """Levée quand le quota de l'API (tier gratuit) est atteint : inutile de
+    réessayer tout de suite, contrairement à un `ServerError` transitoire."""
+
+
 class _GenerateContent(Protocol):
     def generate_content(self, **kwargs: Any) -> Any: ...
 
@@ -55,6 +60,12 @@ def _redact(message: str) -> str:
     if settings.llm_api_key and settings.llm_api_key in message:
         return message.replace(settings.llm_api_key, "***")
     return message
+
+
+def _is_rate_limit(message: str) -> bool:
+    """Motif observé pour un quota dépassé (429 RESOURCE_EXHAUSTED), par
+    analogie avec le 503 UNAVAILABLE confirmé en production."""
+    return message.startswith("429") or "RESOURCE_EXHAUSTED" in message
 
 
 def extract(image_png: bytes, *, client: _Client | None = None) -> dict:
@@ -91,7 +102,10 @@ def extract(image_png: bytes, *, client: _Client | None = None) -> dict:
                 raise ExtractError(f"Appel au modèle échoué : {_redact(str(exc))}") from exc
             time.sleep(RETRY_DELAY_SECONDS)
         except Exception as exc:
-            raise ExtractError(f"Appel au modèle échoué : {_redact(str(exc))}") from exc
+            message = _redact(str(exc))
+            if _is_rate_limit(message):
+                raise RateLimitError(f"Quota du modèle atteint : {message}") from exc
+            raise ExtractError(f"Appel au modèle échoué : {message}") from exc
 
     if not isinstance(data, dict) or "periode" not in data or "creneaux" not in data:
         raise ExtractError("Réponse du modèle sans periode/creneaux")

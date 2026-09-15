@@ -11,7 +11,7 @@ from reportlab.pdfgen import canvas
 from app.auth import CurrentUser, require_user
 from app.calendar_sync import ExistingEvent, SyncError, SyncResult
 from app.db import transaction
-from app.llm import ExtractError
+from app.llm import ExtractError, RateLimitError
 from app.main import app
 from app.upload import ERROR_MESSAGES, get_calendar_lister, get_calendar_syncer, get_extractor
 
@@ -159,6 +159,25 @@ def test_upload_pdf_extraction_failure_shows_error_message(client, tmp_path):
     # Sous-chaine sans apostrophe : le message complet contient des apostrophes
     # que Jinja echappe en &#39; dans le HTML rendu.
     assert "Réessaie ou recadre à la main" in response.text
+
+
+def test_upload_pdf_rate_limit_shows_distinct_message(client, tmp_path):
+    """Un quota depasse n'est pas la meme situation qu'un echec quelconque :
+    la personne doit comprendre qu'il faut attendre, pas recadrer a la main."""
+
+    def _rate_limited_extractor(image_png: bytes) -> dict:
+        raise RateLimitError("quota depasse simule")
+
+    _override_user(given_name="Sophie", family_name="MARTIN")
+    app.dependency_overrides[get_extractor] = lambda: _rate_limited_extractor
+    pdf_path = tmp_path / "planning.pdf"
+    _build_planning_pdf(pdf_path)
+
+    with open(pdf_path, "rb") as f:
+        response = client.post("/upload", files={"file": ("planning.pdf", f, "application/pdf")})
+
+    assert response.status_code == 200
+    assert "Réessaie dans quelques minutes" in response.text
 
 
 def test_upload_pdf_validation_failure_shows_error_message(client, tmp_path):
