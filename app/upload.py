@@ -7,6 +7,7 @@ d'upload (voir description de la PR).
 from __future__ import annotations
 
 import json
+import logging
 import shutil
 import tempfile
 import time
@@ -29,11 +30,14 @@ from app.calendar_sync import (
 )
 from app.db import get_last_crop, get_pdf_name, set_last_crop, set_pdf_name
 from app.llm import ExtractError, extract
+from app.log import log
 from app.pdf.crop import compose_crop, crop_manual
 from app.pdf.locate import LocateResult, build_candidates, locate
 from app.pdf.render import render_pages
 from app.settings import settings
 from app.validate import ValidatedExtraction, ValidationError, validate
+
+logger = logging.getLogger("app")
 
 EXTRACTION_CACHE_NAME = "extraction.json"
 
@@ -175,7 +179,15 @@ def _build_preview(
     try:
         raw = extractor(composed_path.read_bytes())
         extraction = validate(raw, validation_weeks=settings.validation_weeks)
-    except ExtractError:
+    except ExtractError as exc:
+        logger.exception("Extraction du modele en echec")
+        log(
+            request_id=getattr(request.state, "request_id", ""),
+            email=user.email,
+            step="llm",
+            status="error",
+            detail={"erreur": str(exc)},
+        )
         extraction = ValidationError("extraction_echouee")
 
     if isinstance(extraction, ValidationError):
@@ -431,6 +443,14 @@ def confirm(
     result = calendar_syncer(user.email, user.name, extraction)
 
     if isinstance(result, SyncError):
+        logger.error("Ecriture agenda en echec : %s", result.detail)
+        log(
+            request_id=getattr(request.state, "request_id", ""),
+            email=user.email,
+            step="write",
+            status="error",
+            detail={"erreur": result.detail},
+        )
         try:
             existing_events = calendar_lister(
                 user.email, extraction.periode_debut, extraction.periode_fin

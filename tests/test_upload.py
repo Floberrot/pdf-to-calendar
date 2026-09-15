@@ -10,6 +10,7 @@ from reportlab.pdfgen import canvas
 
 from app.auth import CurrentUser, require_user
 from app.calendar_sync import ExistingEvent, SyncError, SyncResult
+from app.db import transaction
 from app.llm import ExtractError
 from app.main import app
 from app.upload import ERROR_MESSAGES, get_calendar_lister, get_calendar_syncer, get_extractor
@@ -330,3 +331,53 @@ def test_confirm_sync_failure_shows_error_and_keeps_upload(client, tmp_path):
     # disponible pour reessayer, le dossier d'upload n'est pas purge.
     assert "09:00" in response.text
     assert client.get(f"/upload/{upload_id}/manual").status_code == 200
+
+
+def test_upload_pdf_extraction_failure_is_logged(client, tmp_path):
+    """La vraie cause d'un echec modele doit etre journalisee (visible via
+    Railway et, plus tard, le journal admin) : sinon elle est indiagnosticable."""
+
+    def _broken_extractor(image_png: bytes) -> dict:
+        raise ExtractError("panne modele bien precise")
+
+    _override_user(given_name="Sophie", family_name="MARTIN")
+    app.dependency_overrides[get_extractor] = lambda: _broken_extractor
+    pdf_path = tmp_path / "planning.pdf"
+    _build_planning_pdf(pdf_path)
+
+    with open(pdf_path, "rb") as f:
+        client.post("/upload", files={"file": ("planning.pdf", f, "application/pdf")})
+
+    with transaction() as conn:
+        row = conn.execute(
+            "SELECT * FROM imports WHERE email = ? AND step = 'llm' AND status = 'error' "
+            "ORDER BY ts DESC LIMIT 1",
+            ("ami@example.com",),
+        ).fetchone()
+    assert row is not None
+    assert "panne modele bien precise" in row["detail"]
+
+
+def test_confirm_sync_failure_is_logged(client, tmp_path):
+    def _failing_syncer(email, name, extraction):
+        return SyncError("panne agenda bien precise")
+
+    _override_user(given_name="Sophie", family_name="MARTIN")
+    app.dependency_overrides[get_calendar_syncer] = lambda: _failing_syncer
+    pdf_path = tmp_path / "planning.pdf"
+    _build_planning_pdf(pdf_path)
+
+    with open(pdf_path, "rb") as f:
+        preview = client.post("/upload", files={"file": ("planning.pdf", f, "application/pdf")})
+    upload_id = _upload_id_from(preview.text, suffix="name")
+
+    client.post(f"/upload/{upload_id}/confirm")
+
+    with transaction() as conn:
+        row = conn.execute(
+            "SELECT * FROM imports WHERE email = ? AND step = 'write' AND status = 'error' "
+            "ORDER BY ts DESC LIMIT 1",
+            ("ami@example.com",),
+        ).fetchone()
+    assert row is not None
+    assert "panne agenda bien precise" in row["detail"]
