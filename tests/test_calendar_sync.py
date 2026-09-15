@@ -7,33 +7,79 @@ from __future__ import annotations
 
 from datetime import date
 
-from app.calendar_sync import APP_TAG, ExistingEvent, list_existing_events
+from app.calendar_sync import (
+    APP_TAG,
+    ExistingEvent,
+    SyncError,
+    SyncResult,
+    list_existing_events,
+    sync_to_calendar,
+)
+from app.settings import settings
+from app.validate import Creneau, ValidatedExtraction
 
 
 class _FakeExecutable:
-    def __init__(self, items: list[dict]):
-        self._items = items
+    def __init__(self, result):
+        self._result = result
 
-    def execute(self) -> dict:
-        return {"items": self._items}
+    def execute(self):
+        return self._result
+
+
+class _FailingExecutable:
+    def execute(self):
+        raise RuntimeError("panne agenda simulee")
 
 
 class _FakeEvents:
-    def __init__(self, items: list[dict], calls: list[dict]):
+    def __init__(
+        self, items: list[dict], calls: list[dict], *, fail_on_insert_index: int | None = None
+    ):
         self._items = items
         self._calls = calls
+        self._fail_on_insert_index = fail_on_insert_index
+        self._insert_count = 0
 
-    def list(self, **kwargs) -> _FakeExecutable:
-        self._calls.append(kwargs)
-        return _FakeExecutable(self._items)
+    def list(self, **kwargs):
+        self._calls.append({"op": "list", **kwargs})
+        return _FakeExecutable({"items": self._items})
+
+    def insert(self, **kwargs):
+        self._calls.append({"op": "insert", **kwargs})
+        index = self._insert_count
+        self._insert_count += 1
+        if index == self._fail_on_insert_index:
+            return _FailingExecutable()
+        return _FakeExecutable({"id": f"new{index}"})
+
+    def delete(self, **kwargs):
+        self._calls.append({"op": "delete", **kwargs})
+        return _FakeExecutable({})
 
 
 class _FakeService:
-    def __init__(self, items: list[dict], calls: list[dict]):
-        self._events = _FakeEvents(items, calls)
+    def __init__(
+        self, items: list[dict], calls: list[dict], *, fail_on_insert_index: int | None = None
+    ):
+        self._events = _FakeEvents(items, calls, fail_on_insert_index=fail_on_insert_index)
 
     def events(self) -> _FakeEvents:
         return self._events
+
+
+def _old_event(event_id: str, start_date: str, end_date: str) -> dict:
+    return {"id": event_id, "summary": "", "start": {"date": start_date}, "end": {"date": end_date}}
+
+
+def _extraction(*creneaux_args) -> ValidatedExtraction:
+    creneaux = [
+        Creneau(date=d, debut=debut, fin=fin, lieu=lieu, duration_hours=1)
+        for d, debut, fin, lieu in creneaux_args
+    ]
+    return ValidatedExtraction(
+        periode_debut=date(2026, 9, 14), periode_fin=date(2026, 9, 20), creneaux=creneaux
+    )
 
 
 def test_list_existing_events_maps_response_items():
@@ -109,3 +155,119 @@ def test_list_existing_events_queries_period_plus_one_day():
 
     assert calls[0]["timeMin"] == "2026-09-14T00:00:00Z"
     assert calls[0]["timeMax"] == "2026-09-21T00:00:00Z"
+
+
+def test_sync_returns_counts_on_success():
+    old_items = [_old_event("old1", "2026-09-15", "2026-09-16")]
+    service = _FakeService(old_items, [])
+    extraction = _extraction(
+        (date(2026, 9, 15), "09:00", "17:00", "Site B"),
+        (date(2026, 9, 16), "09:00", "17:00", ""),
+    )
+
+    result = sync_to_calendar("ami@example.com", "Sophie Martin", extraction, service=service)
+
+    assert result == SyncResult(inserted_count=2, replaced_count=1)
+
+
+def test_sync_inserts_before_deleting_old_events():
+    old_items = [_old_event("old1", "2026-09-15", "2026-09-16")]
+    calls: list[dict] = []
+    service = _FakeService(old_items, calls)
+    extraction = _extraction((date(2026, 9, 15), "09:00", "17:00", ""))
+
+    sync_to_calendar("ami@example.com", "Sophie Martin", extraction, service=service)
+
+    ops = [call["op"] for call in calls]
+    assert ops.index("insert") < ops.index("delete")
+
+
+def test_sync_tags_inserted_events_with_app_and_email():
+    calls: list[dict] = []
+    service = _FakeService([], calls)
+    extraction = _extraction((date(2026, 9, 15), "09:00", "17:00", ""))
+
+    sync_to_calendar("ami@example.com", "Sophie Martin", extraction, service=service)
+
+    insert_call = next(call for call in calls if call["op"] == "insert")
+    tags = insert_call["body"]["extendedProperties"]["private"]
+    assert tags == {"app": APP_TAG, "email": "ami@example.com"}
+
+
+def test_sync_builds_title_with_name_and_formatted_hours():
+    calls: list[dict] = []
+    service = _FakeService([], calls)
+    extraction = _extraction((date(2026, 9, 15), "09:00", "17:30", ""))
+
+    sync_to_calendar("ami@example.com", "Sophie Martin", extraction, service=service)
+
+    insert_call = next(call for call in calls if call["op"] == "insert")
+    assert insert_call["body"]["summary"] == "Sophie Martin — 9h-17h30"
+
+
+def test_sync_sets_explicit_timezone_never_utc():
+    calls: list[dict] = []
+    service = _FakeService([], calls)
+    extraction = _extraction((date(2026, 9, 15), "09:00", "17:00", ""))
+
+    sync_to_calendar("ami@example.com", "Sophie Martin", extraction, service=service)
+
+    insert_call = next(call for call in calls if call["op"] == "insert")
+    assert insert_call["body"]["start"]["timeZone"] == settings.tz
+    assert insert_call["body"]["end"]["timeZone"] == settings.tz
+
+
+def test_sync_overnight_creneau_ends_next_day():
+    calls: list[dict] = []
+    service = _FakeService([], calls)
+    extraction = _extraction((date(2026, 9, 15), "21:00", "07:00", ""))
+
+    sync_to_calendar("ami@example.com", "Sophie Martin", extraction, service=service)
+
+    insert_call = next(call for call in calls if call["op"] == "insert")
+    assert insert_call["body"]["start"]["dateTime"] == "2026-09-15T21:00:00"
+    assert insert_call["body"]["end"]["dateTime"] == "2026-09-16T07:00:00"
+
+
+def test_sync_rolls_back_inserted_events_when_one_insertion_fails():
+    old_items = [_old_event("old1", "2026-09-15", "2026-09-16")]
+    calls: list[dict] = []
+    service = _FakeService(old_items, calls, fail_on_insert_index=1)
+    extraction = _extraction(
+        (date(2026, 9, 15), "09:00", "17:00", ""),
+        (date(2026, 9, 16), "09:00", "17:00", ""),
+    )
+
+    result = sync_to_calendar("ami@example.com", "Sophie Martin", extraction, service=service)
+
+    assert isinstance(result, SyncError)
+    deleted_ids = [call["eventId"] for call in calls if call["op"] == "delete"]
+    assert deleted_ids == ["new0"]
+
+
+def test_sync_never_deletes_old_events_when_an_insertion_fails():
+    old_items = [_old_event("old1", "2026-09-15", "2026-09-16")]
+    calls: list[dict] = []
+    service = _FakeService(old_items, calls, fail_on_insert_index=0)
+    extraction = _extraction((date(2026, 9, 15), "09:00", "17:00", ""))
+
+    sync_to_calendar("ami@example.com", "Sophie Martin", extraction, service=service)
+
+    # La toute premiere insertion echoue : rien n'a ete cree, donc aucune
+    # suppression ne doit avoir lieu, ni des anciens evenements ni du rollback.
+    assert not any(call["op"] == "delete" for call in calls)
+
+
+def test_sync_only_deletes_ids_returned_by_the_tagged_listing():
+    old_items = [
+        _old_event("old1", "2026-09-15", "2026-09-16"),
+        _old_event("old2", "2026-09-16", "2026-09-17"),
+    ]
+    calls: list[dict] = []
+    service = _FakeService(old_items, calls)
+    extraction = _extraction((date(2026, 9, 15), "09:00", "17:00", ""))
+
+    sync_to_calendar("ami@example.com", "Sophie Martin", extraction, service=service)
+
+    deleted_ids = {call["eventId"] for call in calls if call["op"] == "delete"}
+    assert deleted_ids == {"old1", "old2"}
