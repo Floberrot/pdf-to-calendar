@@ -50,6 +50,7 @@ class _Events(Protocol):
     def list(self, **kwargs: Any) -> Any: ...
     def insert(self, **kwargs: Any) -> Any: ...
     def delete(self, **kwargs: Any) -> Any: ...
+    def get(self, **kwargs: Any) -> Any: ...
 
 
 class _CalendarService(Protocol):
@@ -184,6 +185,28 @@ def _color_id_for_email(email: str) -> str:
     """Un `colorId` Google Calendar (chaîne « 1 » à « 11 ») stable par email."""
     digest = hashlib.sha256(email.strip().lower().encode()).hexdigest()
     return str(int(digest, 16) % COLOR_ID_COUNT + 1)
+
+
+def health_check(*, service: _CalendarService | None = None) -> None:
+    """Test de santé (page admin, plan section 4) : crée un événement bidon,
+    le lit, le supprime. Ne renvoie rien ; laisse l'exception de l'API
+    remonter telle quelle si un des trois appels échoue."""
+    if service is None:
+        service = _build_service()
+
+    now = datetime.now(UTC)
+    body = {
+        "summary": "Test de santé — à ignorer",
+        "start": {"dateTime": now.isoformat(), "timeZone": settings.tz},
+        "end": {"dateTime": (now + timedelta(minutes=1)).isoformat(), "timeZone": settings.tz},
+        "extendedProperties": {"private": {"app": APP_TAG, "email": "healthcheck"}},
+    }
+    event = service.events().insert(calendarId=settings.calendar_id, body=body).execute()
+    event_id = event["id"]
+    try:
+        service.events().get(calendarId=settings.calendar_id, eventId=event_id).execute()
+    finally:
+        service.events().delete(calendarId=settings.calendar_id, eventId=event_id).execute()
 
 
 def _delete_events(service: _CalendarService, event_ids: list[str]) -> int:

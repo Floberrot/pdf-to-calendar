@@ -10,7 +10,7 @@ import json
 import pytest
 from google.genai.errors import ServerError
 
-from app.llm import MAX_ATTEMPTS, ExtractError, RateLimitError, extract
+from app.llm import MAX_ATTEMPTS, ExtractError, RateLimitError, extract, health_check
 from app.settings import settings
 
 
@@ -167,3 +167,23 @@ def test_extract_raises_rate_limit_error_on_quota_exhausted():
 
     # Reessayer tout de suite n'aiderait pas contre un quota depasse.
     assert len(calls) == 1
+
+
+def test_health_check_succeeds_on_trivial_json_without_periode_creneaux():
+    """Le test de sante ne doit pas dependre du schema periode/creneaux
+    reel : un JSON trivial suffit, contrairement a extract()."""
+    client = _FakeClient(json.dumps({"ok": True}))
+
+    health_check(client=client)  # ne doit pas lever
+
+
+def test_health_check_raises_extract_error_on_provider_exception():
+    class _BrokenModels:
+        def generate_content(self, **kwargs):
+            raise RuntimeError("panne modele simulee")
+
+    class _BrokenClient:
+        models = _BrokenModels()
+
+    with pytest.raises(ExtractError):
+        health_check(client=_BrokenClient())
