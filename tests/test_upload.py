@@ -465,6 +465,26 @@ def test_upload_pdf_name_not_found_shows_name_form(client, tmp_path):
     assert "n'a pas été trouvé" in response.text
 
 
+def test_retry_with_unknown_name_shows_reason_instead_of_manual_crop(client, tmp_path):
+    """Retour utilisateur (« ça me demande le recadrage ») : un nom tapé qui
+    ne matchait pas renvoyait vers le recadrage manuel sans dire pourquoi.
+    Le motif doit s'afficher, avec le nom tapé prérempli pour le corriger."""
+    _override_user(given_name="Inconnue", family_name="PERSONNE")
+    pdf_path = tmp_path / "planning.pdf"
+    _build_planning_pdf(pdf_path)
+    with open(pdf_path, "rb") as f:
+        upload_response = client.post(
+            "/upload", files={"file": ("planning.pdf", f, "application/pdf")}
+        )
+    upload_id = _upload_id_from(upload_response.text, suffix="name")
+
+    response = client.post(f"/upload/{upload_id}/name", data={"pdf_name": "Zoé INCONNUE"})
+
+    assert response.status_code == 200
+    assert "« Zoé INCONNUE » n'a pas été trouvé" in response.text
+    assert 'value="Zoé INCONNUE"' in response.text
+
+
 def test_upload_pdf_too_large_shows_error(client):
     _override_user()
     big_content = b"%PDF-1.4\n" + b"0" * (11 * 1024 * 1024)
