@@ -10,6 +10,7 @@ import json
 import pytest
 
 from app.llm import ExtractError, extract
+from app.settings import settings
 
 
 class _FakeResponse:
@@ -66,3 +67,21 @@ def test_extract_provider_exception_raises_clean_error():
 
     with pytest.raises(ExtractError):
         extract(b"fake-png-bytes", client=_BrokenClient())
+
+
+def test_extract_redacts_api_key_from_error_message():
+    """Jamais de secret dans les logs (CLAUDE.md) : le message d'erreur peut
+    finir journalisé, la clé API ne doit jamais y apparaître en clair."""
+
+    class _BrokenModels:
+        def generate_content(self, **kwargs):
+            raise RuntimeError(f"401 unauthorized, key={settings.llm_api_key}")
+
+    class _BrokenClient:
+        models = _BrokenModels()
+
+    with pytest.raises(ExtractError) as exc_info:
+        extract(b"fake-png-bytes", client=_BrokenClient())
+
+    assert settings.llm_api_key not in str(exc_info.value)
+    assert "***" in str(exc_info.value)

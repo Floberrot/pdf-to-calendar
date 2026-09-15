@@ -70,7 +70,10 @@ def extract(image_png: bytes, *, client: _Client | None = None) -> dict:
         )
         data = json.loads(response.text)
     except Exception as exc:
-        raise ExtractError(f"Appel au modèle échoué : {exc}") from exc
+        message = str(exc)
+        if settings.llm_api_key and settings.llm_api_key in message:
+            message = message.replace(settings.llm_api_key, "***")
+        raise ExtractError(f"Appel au modèle échoué : {message}") from exc
 
     if not isinstance(data, dict) or "periode" not in data or "creneaux" not in data:
         raise ExtractError("Réponse du modèle sans periode/creneaux")
