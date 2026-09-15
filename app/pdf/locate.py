@@ -14,7 +14,11 @@ from typing import Literal
 
 import pdfplumber
 
-LineTolerance = 3.0
+# 3.0 était trop strict : un nom et un prénom dans des polices différentes
+# (courant pour distinguer visuellement le nom de famille) peuvent avoir un
+# `top` pdfplumber différent de quelques points sans être sur une autre
+# ligne, ce qui empêchait tout candidat à plusieurs mots de jamais matcher.
+LineTolerance = 5.0
 DateAlignTolerance = 5.0
 MinEdgeWidthRatio = 1 / 3
 MinAlignedDates = 3
