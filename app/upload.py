@@ -29,7 +29,7 @@ from app.calendar_sync import (
     sync_to_calendar,
 )
 from app.db import get_last_crop, get_pdf_name, set_last_crop, set_pdf_name
-from app.llm import ExtractError, extract
+from app.llm import ExtractError, RateLimitError, extract
 from app.log import log
 from app.pdf.crop import compose_crop, crop_manual
 from app.pdf.locate import LocateResult, build_candidates, locate
@@ -54,6 +54,10 @@ NAME_RETRY_REASONS = {"nom_introuvable", "nom_homonyme"}
 ERROR_MESSAGES = {
     "extraction_echouee": (
         "Le modèle n'a pas réussi à lire l'image. Réessaie ou recadre à la main."
+    ),
+    "limite_atteinte": (
+        "Le quota gratuit du modèle est atteint pour l'instant. Réessaie dans "
+        "quelques minutes, ou demain si ça persiste."
     ),
     "periode_invalide": "La période renvoyée par le modèle est invalide.",
     "periode_trop_longue": (
@@ -159,6 +163,16 @@ def _render_preview(
     )
 
 
+def _log_llm_failure(request: Request, user: CurrentUser, message: str) -> None:
+    log(
+        request_id=getattr(request.state, "request_id", ""),
+        email=user.email,
+        step="llm",
+        status="error",
+        detail={"erreur": message},
+    )
+
+
 def _build_preview(
     request: Request,
     user: CurrentUser,
@@ -179,15 +193,13 @@ def _build_preview(
     try:
         raw = extractor(composed_path.read_bytes())
         extraction = validate(raw, validation_weeks=settings.validation_weeks)
+    except RateLimitError as exc:
+        logger.exception("Quota du modele atteint")
+        _log_llm_failure(request, user, str(exc))
+        extraction = ValidationError("limite_atteinte")
     except ExtractError as exc:
         logger.exception("Extraction du modele en echec")
-        log(
-            request_id=getattr(request.state, "request_id", ""),
-            email=user.email,
-            step="llm",
-            status="error",
-            detail={"erreur": str(exc)},
-        )
+        _log_llm_failure(request, user, str(exc))
         extraction = ValidationError("extraction_echouee")
 
     if isinstance(extraction, ValidationError):

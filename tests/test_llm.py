@@ -10,7 +10,7 @@ import json
 import pytest
 from google.genai.errors import ServerError
 
-from app.llm import MAX_ATTEMPTS, ExtractError, extract
+from app.llm import MAX_ATTEMPTS, ExtractError, RateLimitError, extract
 from app.settings import settings
 
 
@@ -145,4 +145,25 @@ def test_extract_does_not_retry_non_server_errors():
     with pytest.raises(ExtractError):
         extract(b"fake-png-bytes", client=_BrokenClient())
 
+    assert len(calls) == 1
+
+
+def test_extract_raises_rate_limit_error_on_quota_exhausted():
+    calls = []
+
+    class _QuotaExhaustedModels:
+        def generate_content(self, **kwargs):
+            calls.append(1)
+            raise RuntimeError(
+                "429 RESOURCE_EXHAUSTED. {'error': {'code': 429, "
+                "'message': 'quota exceeded', 'status': 'RESOURCE_EXHAUSTED'}}"
+            )
+
+    class _QuotaExhaustedClient:
+        models = _QuotaExhaustedModels()
+
+    with pytest.raises(RateLimitError):
+        extract(b"fake-png-bytes", client=_QuotaExhaustedClient())
+
+    # Reessayer tout de suite n'aiderait pas contre un quota depasse.
     assert len(calls) == 1
