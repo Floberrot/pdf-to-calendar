@@ -40,7 +40,12 @@ semaine doit être inclus).
 "lieu" est une chaîne vide si rien n'est indiqué. Un jour sans créneau \
 n'apparaît pas dans la liste. Une même journée peut avoir plusieurs créneaux \
 (coupure). Si un créneau se termine après minuit, indique l'heure de fin \
-telle qu'écrite sur le planning (ex. 21:00 à 07:00), sans changer la date."""
+telle qu'écrite sur le planning (ex. 21:00 à 07:00), sans changer la date.
+- "jours_incertains" : liste d'objets {{"date": "AAAA-MM-JJ", "texte": "..."}}, \
+un par jour où la case n'est ni vide, ni un horaire clair (HH:MM-HH:MM), ni une \
+mention habituelle de repos ou d'absence (congé, RTT, repos, récupération, \
+arrêt maladie...). "texte" reprend ce qui est écrit dans la case, tel quel, \
+sans l'interpréter. Ces jours n'apparaissent jamais dans "creneaux"."""
 
 
 class ExtractError(Exception):

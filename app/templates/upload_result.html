@@ -35,6 +35,20 @@
 <p>Aucun créneau de travail sur cette période (semaine de repos).</p>
 {% endif %}
 
+{% if extraction.jours_incertains %}
+<h2>Jours à vérifier</h2>
+<p class="muted">
+  Case non vide sur le planning, mais ni horaire clair ni absence reconnue
+  (congé, RTT, repos...). Un événement journée entière sera ajouté pour ces
+  jours-là : tu pourras y mettre tes horaires toi-même une fois vérifié.
+</p>
+<ul>
+  {% for jour in extraction.jours_incertains %}
+  <li>{{ jour.date.strftime("%d/%m/%Y") }} — « {{ jour.texte }} »</li>
+  {% endfor %}
+</ul>
+{% endif %}
+
 <h2>Anciens événements sur cette période</h2>
 {% if existing_events is none %}
 <p class="muted">Impossible de vérifier les anciens événements pour l'instant.</p>

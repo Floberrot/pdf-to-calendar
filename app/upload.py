@@ -566,6 +566,7 @@ def confirm(
             "user": user,
             "inserted_count": result.inserted_count,
             "replaced_count": result.replaced_count,
+            "uncertain_count": result.uncertain_count,
         },
     )
 

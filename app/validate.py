@@ -34,10 +34,21 @@ class Creneau:
 
 
 @dataclass(frozen=True)
+class JourIncertain:
+    """Case non vide sur le planning, mais ni horaire clair ni absence
+    reconnue (llm.py) : un événement journée entière est créé pour ce jour
+    plutôt que de perdre l'information en silence (retour utilisateur)."""
+
+    date: date
+    texte: str
+
+
+@dataclass(frozen=True)
 class ValidatedExtraction:
     periode_debut: date
     periode_fin: date
     creneaux: list[Creneau]
+    jours_incertains: list[JourIncertain]
 
 
 @dataclass(frozen=True)
@@ -107,6 +118,24 @@ def validate(
             )
         )
 
+    # Repris "au mieux" : une case ambiguë est déjà une donnée incertaine, une
+    # entrée mal formée ou hors période ne doit pas faire échouer tout le
+    # reste (contrairement à un créneau, dont une erreur est plus grave).
+    creneau_dates = {creneau.date for creneau in creneaux}
+    jours_incertains: list[JourIncertain] = []
+    for raw_jour in raw.get("jours_incertains") or []:
+        try:
+            jour_date = date.fromisoformat(raw_jour["date"])
+        except (KeyError, ValueError, TypeError):
+            continue
+        if periode_debut <= jour_date <= periode_fin and jour_date not in creneau_dates:
+            jours_incertains.append(
+                JourIncertain(date=jour_date, texte=str(raw_jour.get("texte") or ""))
+            )
+
     return ValidatedExtraction(
-        periode_debut=periode_debut, periode_fin=periode_fin, creneaux=creneaux
+        periode_debut=periode_debut,
+        periode_fin=periode_fin,
+        creneaux=creneaux,
+        jours_incertains=jours_incertains,
     )

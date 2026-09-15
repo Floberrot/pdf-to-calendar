@@ -9,8 +9,11 @@ from app.validate import ValidatedExtraction, ValidationError, validate
 TODAY = date(2026, 9, 14)
 
 
-def _raw(periode_debut, periode_fin, creneaux):
-    return {"periode": {"debut": periode_debut, "fin": periode_fin}, "creneaux": creneaux}
+def _raw(periode_debut, periode_fin, creneaux, jours_incertains=None):
+    raw = {"periode": {"debut": periode_debut, "fin": periode_fin}, "creneaux": creneaux}
+    if jours_incertains is not None:
+        raw["jours_incertains"] = jours_incertains
+    return raw
 
 
 def test_validate_accepts_simple_creneau():
@@ -120,3 +123,78 @@ def test_validate_accepts_rest_day_within_periode_with_no_creneau():
 
     assert isinstance(result, ValidatedExtraction)
     assert result.creneaux == []
+
+
+def test_validate_accepts_jour_incertain():
+    raw = _raw(
+        "2026-09-14",
+        "2026-09-20",
+        [],
+        jours_incertains=[{"date": "2026-09-16", "texte": "ASTR"}],
+    )
+
+    result = validate(raw, validation_weeks=8, today=TODAY)
+
+    assert isinstance(result, ValidatedExtraction)
+    assert len(result.jours_incertains) == 1
+    assert result.jours_incertains[0].date == date(2026, 9, 16)
+    assert result.jours_incertains[0].texte == "ASTR"
+
+
+def test_validate_missing_jours_incertains_key_is_empty_list():
+    """Clé absente de la réponse du modèle : pas une erreur, juste aucun jour
+    ambigu (comme "creneaux" absent)."""
+    raw = _raw("2026-09-14", "2026-09-20", [])
+
+    result = validate(raw, validation_weeks=8, today=TODAY)
+
+    assert isinstance(result, ValidatedExtraction)
+    assert result.jours_incertains == []
+
+
+def test_validate_drops_jour_incertain_outside_periode():
+    """Repris au mieux : une entrée hors période ne fait pas échouer le reste
+    de l'extraction (contrairement à un créneau hors période)."""
+    raw = _raw(
+        "2026-09-14",
+        "2026-09-20",
+        [],
+        jours_incertains=[{"date": "2026-10-01", "texte": "ASTR"}],
+    )
+
+    result = validate(raw, validation_weeks=8, today=TODAY)
+
+    assert isinstance(result, ValidatedExtraction)
+    assert result.jours_incertains == []
+
+
+def test_validate_drops_malformed_jour_incertain():
+    raw = _raw(
+        "2026-09-14",
+        "2026-09-20",
+        [],
+        jours_incertains=[{"date": "pas-une-date", "texte": "ASTR"}],
+    )
+
+    result = validate(raw, validation_weeks=8, today=TODAY)
+
+    assert isinstance(result, ValidatedExtraction)
+    assert result.jours_incertains == []
+
+
+def test_validate_drops_jour_incertain_on_same_date_as_creneau():
+    """Le modèle ne devrait jamais renvoyer les deux pour le même jour (le
+    prompt le lui interdit), mais si ça arrive, le créneau concret l'emporte
+    sur le jour ambigu plutôt que d'écrire les deux dans l'agenda."""
+    raw = _raw(
+        "2026-09-14",
+        "2026-09-20",
+        [{"date": "2026-09-16", "debut": "09:00", "fin": "17:00", "lieu": ""}],
+        jours_incertains=[{"date": "2026-09-16", "texte": "ASTR"}],
+    )
+
+    result = validate(raw, validation_weeks=8, today=TODAY)
+
+    assert isinstance(result, ValidatedExtraction)
+    assert len(result.creneaux) == 1
+    assert result.jours_incertains == []

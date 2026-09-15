@@ -2,10 +2,12 @@
 
 Séquence de `sync_to_calendar` pour un import couvrant [debut, fin] : lister
 les événements déjà tagués (ce qui sera remplacé), insérer les nouveaux
-créneaux, puis seulement si tout est passé, supprimer les anciens. Une
-insertion qui échoue déclenche un retour en arrière (suppression, au mieux,
-de ce qui vient d'être inséré) sans jamais toucher aux anciens événements :
-une panne à mi-chemin laisse l'ancienne semaine en place plutôt qu'un trou.
+créneaux puis les jours incertains (événements journée entière pour une case
+ni horaire clair ni absence reconnue, `validate.JourIncertain`), puis
+seulement si tout est passé, supprimer les anciens. Une insertion qui échoue
+déclenche un retour en arrière (suppression, au mieux, de ce qui vient
+d'être inséré) sans jamais toucher aux anciens événements : une panne à
+mi-chemin laisse l'ancienne semaine en place plutôt qu'un trou.
 """
 
 from __future__ import annotations
@@ -20,7 +22,7 @@ from google.oauth2 import service_account
 from googleapiclient.discovery import build
 
 from app.settings import settings
-from app.validate import Creneau, ValidatedExtraction
+from app.validate import Creneau, JourIncertain, ValidatedExtraction
 
 APP_TAG = "planning-import"
 SCOPES = ["https://www.googleapis.com/auth/calendar"]
@@ -39,6 +41,7 @@ class ExistingEvent:
 class SyncResult:
     inserted_count: int
     replaced_count: int
+    uncertain_count: int = 0
 
 
 @dataclass(frozen=True)
@@ -138,10 +141,22 @@ def sync_to_calendar(
         except Exception as exc:  # noqa: BLE001 - API externe, type d'erreur non garanti
             _delete_events(service, inserted_ids)
             return SyncError(f"L'ajout d'un créneau a échoué, rien n'a été modifié : {exc}")
+    creneau_count = len(inserted_ids)
+
+    for jour in extraction.jours_incertains:
+        try:
+            inserted_ids.append(_insert_jour_incertain(service, email, name, jour))
+        except Exception as exc:  # noqa: BLE001 - API externe, type d'erreur non garanti
+            _delete_events(service, inserted_ids)
+            return SyncError(f"L'ajout d'un jour à vérifier a échoué, rien n'a changé : {exc}")
 
     replaced = _delete_events(service, [event.id for event in to_replace])
 
-    return SyncResult(inserted_count=len(inserted_ids), replaced_count=replaced)
+    return SyncResult(
+        inserted_count=creneau_count,
+        replaced_count=replaced,
+        uncertain_count=len(inserted_ids) - creneau_count,
+    )
 
 
 def _insert_event(service: _CalendarService, email: str, name: str, creneau: Creneau) -> str:
@@ -157,6 +172,25 @@ def _insert_event(service: _CalendarService, email: str, name: str, creneau: Cre
     if creneau.lieu:
         body["location"] = creneau.lieu
 
+    response = service.events().insert(calendarId=settings.calendar_id, body=body).execute()
+    return response["id"]
+
+
+def _insert_jour_incertain(
+    service: _CalendarService, email: str, name: str, jour: JourIncertain
+) -> str:
+    """Événement journée entière, pour un jour où la case du planning n'est
+    ni un horaire clair ni une absence reconnue (validate.py) : plutôt que de
+    perdre l'information, la personne voit le jour dans son agenda et peut y
+    mettre ses propres horaires."""
+    body: dict[str, Any] = {
+        "summary": f"{name} — à vérifier",
+        "description": jour.texte or "Case non vide sur le planning, contenu non reconnu.",
+        "start": {"date": jour.date.isoformat()},
+        "end": {"date": (jour.date + timedelta(days=1)).isoformat()},
+        "reminders": {"useDefault": True},
+        "extendedProperties": {"private": {"app": APP_TAG, "email": email}},
+    }
     response = service.events().insert(calendarId=settings.calendar_id, body=body).execute()
     return response["id"]
 
