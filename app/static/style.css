@@ -242,6 +242,25 @@ button.is-loading::after {
   color: var(--success-fg);
 }
 
+.status-badge {
+  display: inline-block;
+  padding: 0.05rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  margin-left: 0.4rem;
+}
+
+.status-badge--modifie {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  color: var(--accent);
+}
+
+.status-badge--supprime {
+  background: var(--error-bg);
+  color: var(--error-fg);
+}
+
 /* Cartes (regroupements de section, page admin) */
 
 .card {

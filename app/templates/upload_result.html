@@ -43,7 +43,11 @@
   validation :</p>
 <ul>
   {% for event in existing_events %}
-  <li>{{ event.summary }} ({{ event.start }} → {{ event.end }})</li>
+  <li>
+    {{ event.summary }} — {{ event.range_display }}
+    {% if event.status == "modifie" %}<span class="status-badge status-badge--modifie">change</span>{% endif %}
+    {% if event.status == "supprime" %}<span class="status-badge status-badge--supprime">retiré</span>{% endif %}
+  </li>
   {% endfor %}
 </ul>
 {% else %}

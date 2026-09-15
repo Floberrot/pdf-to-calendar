@@ -147,7 +147,7 @@ def sync_to_calendar(
 def _insert_event(service: _CalendarService, email: str, name: str, creneau: Creneau) -> str:
     start_dt, end_dt = _creneau_datetimes(creneau)
     body: dict[str, Any] = {
-        "summary": f"{name} — {_format_heure(creneau.debut)}-{_format_heure(creneau.fin)}",
+        "summary": f"{name} — {format_heure(creneau.debut)}-{format_heure(creneau.fin)}",
         "start": {"dateTime": start_dt, "timeZone": settings.tz},
         "end": {"dateTime": end_dt, "timeZone": settings.tz},
         "colorId": _color_id_for_email(email),
@@ -175,8 +175,11 @@ def _creneau_datetimes(creneau: Creneau) -> tuple[str, str]:
     return start_dt.isoformat(), end_dt.isoformat()
 
 
-def _format_heure(hhmm: str) -> str:
-    """« 09:00 » -> « 9h » ; « 17:30 » -> « 17h30 » (plan, section 6)."""
+def format_heure(hhmm: str) -> str:
+    """« 09:00 » -> « 9h » ; « 17:30 » -> « 17h30 » (plan, section 6).
+
+    Publique (pas de `_`) : reprise par upload.py pour l'affichage des
+    anciens événements dans la prévisualisation."""
     heure, minute = hhmm.split(":")
     return f"{int(heure)}h{minute}" if int(minute) else f"{int(heure)}h"
 

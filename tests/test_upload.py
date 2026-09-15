@@ -200,6 +200,131 @@ def test_upload_pdf_shows_existing_events_to_be_replaced(client, tmp_path):
     assert "Sophie Martin — 8h-16h" in response.text
 
 
+def test_existing_event_date_formatted_not_raw_iso(client, tmp_path):
+    """Les heures brutes de l'API (ISO) étaient illisibles (retour
+    utilisateur) : le format affiché doit être lisible, pas la chaîne ISO."""
+
+    def _lister_with_one_event(email, periode_debut, periode_fin):
+        return [
+            ExistingEvent(
+                id="evt1",
+                summary="Sophie Martin — 8h-16h",
+                start="2026-09-15T08:00:00+02:00",
+                end="2026-09-15T16:00:00+02:00",
+            )
+        ]
+
+    _override_user(given_name="Sophie", family_name="MARTIN")
+    app.dependency_overrides[get_calendar_lister] = lambda: _lister_with_one_event
+    pdf_path = tmp_path / "planning.pdf"
+    _build_planning_pdf(pdf_path)
+
+    with open(pdf_path, "rb") as f:
+        response = client.post("/upload", files={"file": ("planning.pdf", f, "application/pdf")})
+
+    assert response.status_code == 200
+    assert "2026-09-15T08:00:00+02:00" not in response.text
+    assert "15/09/2026" in response.text
+    assert "8h-16h" in response.text
+
+
+def test_existing_event_all_day_shows_journee_entiere(client, tmp_path):
+    def _lister_all_day(email, periode_debut, periode_fin):
+        return [ExistingEvent(id="evt1", summary="Repos", start="2026-09-16", end="2026-09-17")]
+
+    _override_user(given_name="Sophie", family_name="MARTIN")
+    app.dependency_overrides[get_calendar_lister] = lambda: _lister_all_day
+    pdf_path = tmp_path / "planning.pdf"
+    _build_planning_pdf(pdf_path)
+
+    with open(pdf_path, "rb") as f:
+        response = client.post("/upload", files={"file": ("planning.pdf", f, "application/pdf")})
+
+    assert response.status_code == 200
+    assert "journée entière" in response.text
+
+
+def test_existing_event_matching_new_creneau_shows_no_badge(client, tmp_path):
+    """Mêmes horaires que le créneau importé : rien ne change pour cet
+    événement, pas de badge (retour utilisateur : indiquer ce qui change)."""
+    payload = _fake_extraction_payload()
+    creneau = payload["creneaux"][0]
+
+    def _lister_matching(email, periode_debut, periode_fin):
+        return [
+            ExistingEvent(
+                id="evt1",
+                summary="Sophie Martin — 9h-17h",
+                start=f"{creneau['date']}T{creneau['debut']}:00+02:00",
+                end=f"{creneau['date']}T{creneau['fin']}:00+02:00",
+            )
+        ]
+
+    _override_user(given_name="Sophie", family_name="MARTIN")
+    app.dependency_overrides[get_calendar_lister] = lambda: _lister_matching
+    pdf_path = tmp_path / "planning.pdf"
+    _build_planning_pdf(pdf_path)
+
+    with open(pdf_path, "rb") as f:
+        response = client.post("/upload", files={"file": ("planning.pdf", f, "application/pdf")})
+
+    assert response.status_code == 200
+    assert "status-badge" not in response.text
+
+
+def test_existing_event_different_hours_shows_modified_badge(client, tmp_path):
+    """Même jour, horaires différents : la personne doit voir que ça change."""
+    payload = _fake_extraction_payload()
+    creneau = payload["creneaux"][0]
+
+    def _lister_different_hours(email, periode_debut, periode_fin):
+        return [
+            ExistingEvent(
+                id="evt1",
+                summary="Sophie Martin — 8h-16h",
+                start=f"{creneau['date']}T08:00:00+02:00",
+                end=f"{creneau['date']}T16:00:00+02:00",
+            )
+        ]
+
+    _override_user(given_name="Sophie", family_name="MARTIN")
+    app.dependency_overrides[get_calendar_lister] = lambda: _lister_different_hours
+    pdf_path = tmp_path / "planning.pdf"
+    _build_planning_pdf(pdf_path)
+
+    with open(pdf_path, "rb") as f:
+        response = client.post("/upload", files={"file": ("planning.pdf", f, "application/pdf")})
+
+    assert response.status_code == 200
+    assert "status-badge--modifie" in response.text
+
+
+def test_existing_event_on_other_date_shows_removed_badge(client, tmp_path):
+    """Aucun créneau ce jour-là parmi les nouveaux : l'événement va
+    simplement disparaître, pas être remplacé par un autre horaire."""
+
+    def _lister_other_date(email, periode_debut, periode_fin):
+        return [
+            ExistingEvent(
+                id="evt1",
+                summary="Sophie Martin — 9h-17h",
+                start="2000-01-01T09:00:00+02:00",
+                end="2000-01-01T17:00:00+02:00",
+            )
+        ]
+
+    _override_user(given_name="Sophie", family_name="MARTIN")
+    app.dependency_overrides[get_calendar_lister] = lambda: _lister_other_date
+    pdf_path = tmp_path / "planning.pdf"
+    _build_planning_pdf(pdf_path)
+
+    with open(pdf_path, "rb") as f:
+        response = client.post("/upload", files={"file": ("planning.pdf", f, "application/pdf")})
+
+    assert response.status_code == 200
+    assert "status-badge--supprime" in response.text
+
+
 def test_upload_pdf_extraction_failure_shows_error_message(client, tmp_path):
     def _broken_extractor(image_png: bytes) -> dict:
         raise ExtractError("panne simulée")
