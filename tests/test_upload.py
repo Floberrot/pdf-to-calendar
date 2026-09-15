@@ -118,6 +118,63 @@ def test_upload_pdf_success_shows_creneaux_table(client, tmp_path):
     assert "Site B" in response.text
 
 
+def test_upload_sends_redacted_image_to_model_but_shows_original(client, tmp_path):
+    """Le nom ne doit jamais partir vers le modèle (voir _ai_notice.html),
+    mais doit rester visible dans la prévisualisation montrée à la personne
+    (vérification anti-décalage de ligne, plan section 10) : deux images
+    distinctes."""
+    captured: dict[str, bytes] = {}
+
+    def _capturing_extractor(image_png: bytes) -> dict:
+        captured["model_image"] = image_png
+        return _fake_extraction_payload()
+
+    _override_user(given_name="Sophie", family_name="MARTIN")
+    app.dependency_overrides[get_extractor] = lambda: _capturing_extractor
+    pdf_path = tmp_path / "planning.pdf"
+    _build_planning_pdf(pdf_path)
+
+    with open(pdf_path, "rb") as f:
+        response = client.post("/upload", files={"file": ("planning.pdf", f, "application/pdf")})
+    upload_id = _upload_id_from(response.text, suffix="name")
+
+    shown_image = client.get(f"/upload/{upload_id}/image/composed.png").content
+
+    assert "model_image" in captured
+    assert captured["model_image"] != shown_image
+
+
+def test_manual_crop_sends_unredacted_image_to_model(client, tmp_path):
+    """Le recadrage manuel n'a pas de position de nom connue (rectangle
+    tracé à la main) : pas de masquage possible sur cette voie, contrairement
+    à la voie automatique (voir _ai_notice_manual.html)."""
+    captured: dict[str, bytes] = {}
+
+    def _capturing_extractor(image_png: bytes) -> dict:
+        captured["model_image"] = image_png
+        return _fake_extraction_payload()
+
+    _override_user(given_name="Sophie", family_name="MARTIN")
+    app.dependency_overrides[get_extractor] = lambda: _capturing_extractor
+    pdf_path = tmp_path / "planning.pdf"
+    _build_planning_pdf(pdf_path)
+
+    with open(pdf_path, "rb") as f:
+        upload_response = client.post(
+            "/upload", files={"file": ("planning.pdf", f, "application/pdf")}
+        )
+    upload_id = _upload_id_from(upload_response.text, suffix="name")
+
+    manual_response = client.post(
+        f"/upload/{upload_id}/manual",
+        data={"page": 1, "x": 0, "y": 0, "w": 200, "h": 100},
+    )
+    assert manual_response.status_code == 200
+
+    shown_image = client.get(f"/upload/{upload_id}/image/composed.png").content
+    assert captured["model_image"] == shown_image
+
+
 def test_upload_pdf_shows_existing_events_to_be_replaced(client, tmp_path):
     """Plan section 5E : les anciens créneaux qui seront remplacés."""
 

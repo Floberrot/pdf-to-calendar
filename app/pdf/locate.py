@@ -44,6 +44,8 @@ class LocateResult:
     line: Band
     matched_text: str
     candidate_used: str
+    name_x0: float
+    name_x1: float
 
 
 @dataclass(frozen=True)
@@ -333,4 +335,6 @@ def locate(pdf_path: str, candidates: list[str]) -> LocateResult | LocateFailure
             line=line,
             matched_text=name_match.text,
             candidate_used=candidate_used,
+            name_x0=name_match.bbox["x0"],
+            name_x1=name_match.bbox["x1"],
         )

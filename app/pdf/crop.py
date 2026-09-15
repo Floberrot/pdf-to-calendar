@@ -2,16 +2,21 @@
 
 `compose_crop` : voie automatique, deux bandes (en-tête, ligne) empilées.
 `crop_manual` : voie de secours, un seul rectangle tracé à la main.
+`redact_name` : copie grisée de `compose_crop`, pour l'envoi au modèle
+(jamais montrée) ; pas d'équivalent pour `crop_manual`, dont le rectangle
+tracé à la main n'a pas de position de nom connue.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
 
-from PIL import Image
+from PIL import Image, ImageDraw
 
 from app.pdf.locate import LocateResult
 from app.pdf.render import SCALE
+
+NAME_REDACT_MARGIN_PX = 6
 
 
 def compose_crop(page_image_path: Path, result: LocateResult) -> Image.Image:
@@ -43,6 +48,20 @@ def compose_crop(page_image_path: Path, result: LocateResult) -> Image.Image:
     composed.paste(header_crop, (0, 0))
     composed.paste(line_crop, (0, header_crop.height))
     return composed
+
+
+def redact_name(composed: Image.Image, result: LocateResult) -> Image.Image:
+    """Grise la zone du nom sur une copie de l'image composée : c'est cette
+    copie qui part vers le modèle, jamais celle montrée en prévisualisation
+    (compose_crop). Le modèle n'a de toute façon jamais besoin du nom, son
+    prompt ne lui en demande pas (llm.py)."""
+    redacted = composed.copy()
+    left_px = round(result.table_left * SCALE)
+    header_height = round(result.header.bottom * SCALE) - round(result.header.top * SCALE)
+    x0 = max(0, round(result.name_x0 * SCALE) - left_px - NAME_REDACT_MARGIN_PX)
+    x1 = min(redacted.width, round(result.name_x1 * SCALE) - left_px + NAME_REDACT_MARGIN_PX)
+    ImageDraw.Draw(redacted).rectangle([x0, header_height, x1, redacted.height], fill="black")
+    return redacted
 
 
 def crop_manual(page_image_path: Path, *, x: float, y: float, w: float, h: float) -> Image.Image:
