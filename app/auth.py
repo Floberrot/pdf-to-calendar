@@ -73,7 +73,11 @@ def evaluate_login(userinfo: dict) -> tuple[bool, str]:
 @router.get("/login")
 async def login(request: Request):
     redirect_uri = request.url_for("auth_callback")
-    return await oauth.google.authorize_redirect(request, redirect_uri)
+    # prompt=select_account : Google connecte sinon en silence avec la session
+    # de navigateur active, ce qui donne l'impression que /auth/logout ne
+    # fait rien (la session de l'app est bien vidée, mais Google ne redemande
+    # jamais de choisir un compte).
+    return await oauth.google.authorize_redirect(request, redirect_uri, prompt="select_account")
 
 
 @router.get("/callback", name="auth_callback")
