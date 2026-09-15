@@ -2,20 +2,20 @@
 {% block title %}Préciser le nom{% endblock %}
 {% block content %}
 {% if reason == "nom_homonyme" %}
-<h1>Ton nom n'a pas été trouvé automatiquement</h1>
+<h1>{% if tried %}« {{ tried }} » désigne plusieurs lignes{% else %}Ton nom n'a pas été trouvé automatiquement{% endif %}</h1>
 <p>Plusieurs lignes correspondent : {{ matches | join(", ") }}. Tape une version
 plus précise (ex. « DUPONT J. » plutôt que « DUPONT »).</p>
 {% elif reason == "nom_introuvable" %}
-<h1>Ton nom n'a pas été trouvé automatiquement</h1>
-<p>Ton nom n'apparaît pas tel quel dans le PDF. Tape-le exactement comme il est
-écrit dedans.</p>
+<h1>{% if tried %}« {{ tried }} » n'a pas été trouvé{% else %}Ton nom n'a pas été trouvé automatiquement{% endif %}</h1>
+<p>Ce nom n'apparaît pas dans le PDF, ni en entier ni mot par mot. Tape-le
+exactement comme il est écrit dedans.</p>
 {% else %}
 <h1>Changer le nom recherché</h1>
 <p>Tape le nom tel qu'il apparaît dans le PDF, à l'endroit de ta ligne.</p>
 {% endif %}
 <form action="/upload/{{ upload_id }}/name" method="post">
   <div class="field">
-    <input type="text" name="pdf_name" required autofocus>
+    <input type="text" name="pdf_name" value="{{ tried or '' }}" required autofocus>
   </div>
   {% include "_ai_notice.html" %}
   <button type="submit">Valider</button>

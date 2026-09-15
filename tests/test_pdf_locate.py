@@ -237,6 +237,77 @@ def test_locate_family_name_next_to_empty_cell_is_not_a_false_homonym(tmp_path):
     assert result.matched_text == "DUPONT"
 
 
+def test_locate_falls_back_to_the_readable_word_when_the_other_is_not(tmp_path):
+    """Nom de famille illisible pour pdfplumber (police sans table Unicode,
+    texte vectorisé...) : « Jean DUPONT » ne peut pas matcher en entier, mais
+    « Jean » seul désigne une seule ligne — on la prend, en gardant le nom
+    complet tapé comme `candidate_used` (c'est lui qui est enregistré)."""
+    pdf_path = tmp_path / "planning.pdf"
+    names = ["MARTIN Sophie", "Jean (cid:36)(cid:52)", "BERNARD Paul"]
+    _build_planning_pdf(pdf_path, names=names)
+
+    result = locate(
+        str(pdf_path),
+        candidates=build_candidates(pdf_name="Jean DUPONT", family_name="", given_name=""),
+        fallback_words=["Jean", "DUPONT"],
+    )
+
+    assert isinstance(result, LocateResult)
+    assert result.matched_text == "Jean"
+    assert result.candidate_used == "Jean DUPONT"
+
+
+def test_locate_word_fallback_refuses_words_found_on_two_different_lines(tmp_path):
+    """Garde-fou du repli mot par mot (risque n°1) : « Jean » sur une ligne,
+    « DUPONT » sur une autre, ce sont peut-être deux personnes — on ne
+    tranche pas."""
+    pdf_path = tmp_path / "planning.pdf"
+    _build_planning_pdf(pdf_path, names=["Jean MARTIN", "Pierre DUPONT", "BERNARD Paul"])
+
+    result = locate(
+        str(pdf_path),
+        candidates=build_candidates(pdf_name="Jean DUPONT", family_name="", given_name=""),
+        fallback_words=["Jean", "DUPONT"],
+    )
+
+    assert isinstance(result, LocateFailure)
+    assert result.reason == "nom_homonyme"
+    assert set(result.matches) == {"Jean", "DUPONT"}
+
+
+def test_locate_word_fallback_prefers_the_line_matching_most_words(tmp_path):
+    """Deux « Jean », mais un seul sur la même ligne qu'un « DUPONT » : les
+    mots se départagent entre eux (ici séparés par un jeton, donc hors de
+    portée du match exact), et la zone du nom couvre les deux mots."""
+    pdf_path = tmp_path / "planning.pdf"
+    _build_planning_pdf(pdf_path, names=["Jean MARTIN", "Jean X DUPONT", "BERNARD Paul"])
+
+    result = locate(
+        str(pdf_path),
+        candidates=build_candidates(pdf_name="Jean DUPONT", family_name="", given_name=""),
+        fallback_words=["Jean", "DUPONT"],
+    )
+
+    assert isinstance(result, LocateResult)
+    assert result.matched_text == "Jean DUPONT"
+    assert result.name_x0 < result.name_x1
+
+
+def test_locate_google_names_never_fall_back_to_given_name_alone(tmp_path):
+    """La détection automatique (compte Google) garde sa propre cascade, qui
+    ne cherche jamais le prénom seul (risque n°1) : sans `fallback_words`,
+    pas de repli mot par mot."""
+    pdf_path = tmp_path / "planning.pdf"
+    names = ["MARTIN Sophie", "Jean (cid:36)(cid:52)", "BERNARD Paul"]
+    _build_planning_pdf(pdf_path, names=names)
+
+    candidates = build_candidates(pdf_name=None, family_name="DUPONT", given_name="Jean")
+    result = locate(str(pdf_path), candidates=candidates)
+
+    assert isinstance(result, LocateFailure)
+    assert result.reason == "nom_introuvable"
+
+
 def test_locate_few_dates_falls_back(tmp_path):
     pdf_path = tmp_path / "planning.pdf"
     _build_planning_pdf(pdf_path, names=NAMES, dates=["Lun 15", "Mar 16"])

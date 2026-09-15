@@ -15,8 +15,10 @@
   Casse, accents et ponctuation n'ont pas d'importance. Si tu tapes ton nom
   et ton prénom (deux mots), les deux ordres sont essayés automatiquement —
   « DUPONT Jean » fonctionne même si le planning écrit « Jean DUPONT », et
-  inversement. Si seul ton prénom apparaît sur le planning, tape seulement
-  ton prénom.
+  inversement. Si l'un des deux mots n'est pas lisible dans le PDF (ça arrive
+  avec certaines polices), l'appli se rabat sur l'autre, à condition qu'il ne
+  désigne qu'une seule ligne. Si seul ton prénom apparaît sur le planning,
+  tape seulement ton prénom.
 </p>
 
 {% if saved %}<p class="success">Enregistré.</p>{% endif %}
