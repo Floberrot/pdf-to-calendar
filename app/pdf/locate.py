@@ -64,8 +64,17 @@ def normalize(text: str) -> str:
 
 
 def build_candidates(*, pdf_name: str | None, family_name: str, given_name: str) -> list[str]:
-    """Candidats de nom, dans l'ordre (plan, section 5B-1)."""
+    """Candidats de nom, dans l'ordre (plan, section 5B-1).
+
+    La casse, les accents et la ponctuation n'ont pas besoin de correspondre
+    (`normalize`, appliqué aux deux côtés par `_search_name`). Seul l'ordre
+    des mots compte : si `pdf_name` en fait exactement deux, les deux ordres
+    sont essayés (retour utilisateur : « NOM Prénom » enregistré ne
+    fonctionnait pas quand le planning écrit « Prénom NOM »)."""
     if pdf_name:
+        words = pdf_name.split()
+        if len(words) == 2:
+            return [pdf_name, f"{words[1]} {words[0]}"]
         return [pdf_name]
 
     family = family_name.strip()

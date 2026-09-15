@@ -176,9 +176,21 @@ def test_build_candidates_order_and_dedup():
     assert candidates == ["Dupont Jean", "Jean Dupont", "Dupont J", "J Dupont", "Dupont"]
 
 
-def test_build_candidates_uses_pdf_name_only():
-    candidates = build_candidates(pdf_name="D. Jean", family_name="Dupont", given_name="Jean")
-    assert candidates == ["D. Jean"]
+def test_build_candidates_pdf_name_ignores_google_names():
+    candidates = build_candidates(pdf_name="Dupont Jean", family_name="Autre", given_name="Nom")
+    assert candidates[0] == "Dupont Jean"
+
+
+def test_build_candidates_pdf_name_tries_both_word_orders():
+    """Retour utilisateur : "NOM Prénom" enregistré dans /account ne
+    fonctionnait pas quand le planning écrit "Prénom NOM"."""
+    candidates = build_candidates(pdf_name="Dupont Jean", family_name="", given_name="")
+    assert candidates == ["Dupont Jean", "Jean Dupont"]
+
+
+def test_build_candidates_pdf_name_single_word_not_reordered():
+    candidates = build_candidates(pdf_name="Dupont", family_name="", given_name="")
+    assert candidates == ["Dupont"]
 
 
 def test_build_candidates_no_given_name():
@@ -191,6 +203,19 @@ def test_build_candidates_no_family_name_returns_empty():
     risquerait de matcher un homonyme de prénom (risque n°1 du plan)."""
     candidates = build_candidates(pdf_name=None, family_name="", given_name="Florian")
     assert candidates == []
+
+
+def test_locate_succeeds_when_pdf_name_order_is_reversed_from_pdf(tmp_path):
+    """Retour utilisateur : « Paul BERNARD » enregistré dans /account doit
+    quand même matcher un planning qui écrit « BERNARD Paul »."""
+    pdf_path = tmp_path / "planning.pdf"
+    _build_planning_pdf(pdf_path, names=NAMES)
+
+    candidates = build_candidates(pdf_name="Paul BERNARD", family_name="", given_name="")
+    result = locate(str(pdf_path), candidates=candidates)
+
+    assert isinstance(result, LocateResult)
+    assert result.matched_text.upper() == "BERNARD PAUL"
 
 
 def test_locate_without_family_name_never_matches_first_name_homonym(tmp_path):
