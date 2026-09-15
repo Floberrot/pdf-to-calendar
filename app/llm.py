@@ -8,13 +8,18 @@ pouvoir changer de fournisseur sans toucher aux appelants.
 from __future__ import annotations
 
 import json
+import time
 from datetime import UTC, datetime
 from typing import Any, Protocol
 
 from google import genai
 from google.genai import types
+from google.genai.errors import ServerError
 
 from app.settings import settings
+
+MAX_ATTEMPTS = 2
+RETRY_DELAY_SECONDS = 5
 
 _PROMPT_TEMPLATE = """Tu lis un planning de travail dans cette image : une bande \
 d'en-tête avec les dates de la semaine, empilée au-dessus de la ligne d'une \
@@ -46,34 +51,47 @@ class _Client(Protocol):
     models: _GenerateContent
 
 
+def _redact(message: str) -> str:
+    if settings.llm_api_key and settings.llm_api_key in message:
+        return message.replace(settings.llm_api_key, "***")
+    return message
+
+
 def extract(image_png: bytes, *, client: _Client | None = None) -> dict:
     """Envoie l'image découpée au modèle, renvoie le JSON {periode, creneaux}.
 
     `client` : injection pour les tests (fournisseur factice, section 13 du
     plan) ; sans lui, construit le vrai client Gemini.
+
+    Un `ServerError` (5xx, ex. « experiencing high demand ») déclenche un
+    réessai : Google indique explicitement que ces pics sont temporaires.
+    Le SDK réessaie déjà une fois en interne ; ça ne suffit pas toujours.
     """
     prompt = _PROMPT_TEMPLATE.format(today=datetime.now(UTC).date().isoformat())
-    try:
-        if client is None:
-            client = genai.Client(api_key=settings.llm_api_key)
+    if client is None:
+        client = genai.Client(api_key=settings.llm_api_key)
 
-        response = client.models.generate_content(
-            model=settings.llm_model,
-            contents=[
-                types.Part.from_bytes(data=image_png, mime_type="image/png"),
-                prompt,
-            ],
-            config=types.GenerateContentConfig(
-                temperature=0,
-                response_mime_type="application/json",
-            ),
-        )
-        data = json.loads(response.text)
-    except Exception as exc:
-        message = str(exc)
-        if settings.llm_api_key and settings.llm_api_key in message:
-            message = message.replace(settings.llm_api_key, "***")
-        raise ExtractError(f"Appel au modèle échoué : {message}") from exc
+    for attempt in range(1, MAX_ATTEMPTS + 1):
+        try:
+            response = client.models.generate_content(
+                model=settings.llm_model,
+                contents=[
+                    types.Part.from_bytes(data=image_png, mime_type="image/png"),
+                    prompt,
+                ],
+                config=types.GenerateContentConfig(
+                    temperature=0,
+                    response_mime_type="application/json",
+                ),
+            )
+            data = json.loads(response.text)
+            break
+        except ServerError as exc:
+            if attempt == MAX_ATTEMPTS:
+                raise ExtractError(f"Appel au modèle échoué : {_redact(str(exc))}") from exc
+            time.sleep(RETRY_DELAY_SECONDS)
+        except Exception as exc:
+            raise ExtractError(f"Appel au modèle échoué : {_redact(str(exc))}") from exc
 
     if not isinstance(data, dict) or "periode" not in data or "creneaux" not in data:
         raise ExtractError("Réponse du modèle sans periode/creneaux")
