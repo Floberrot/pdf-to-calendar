@@ -3,39 +3,41 @@
 {% block content %}
 <h1>Voici ce qui a été trouvé</h1>
 {% if matched_text %}<p>Ligne trouvée : <strong>{{ matched_text }}</strong></p>{% endif %}
-<img src="/upload/{{ upload_id }}/image/composed.png" style="max-width: 100%; border: 1px solid #ccc;">
+<img class="framed" src="/upload/{{ upload_id }}/image/composed.png">
 
 {% if error_message %}
-<p><strong>{{ error_message }}</strong></p>
+<p class="error">{{ error_message }}</p>
 {% elif extraction %}
 <h2>
   Créneaux détectés du {{ extraction.periode_debut.strftime("%d/%m/%Y") }}
   au {{ extraction.periode_fin.strftime("%d/%m/%Y") }}
 </h2>
 {% if extraction.creneaux %}
-<table>
-  <thead>
-    <tr><th>Date</th><th>Début</th><th>Fin</th><th>Lieu</th><th>Durée</th></tr>
-  </thead>
-  <tbody>
-    {% for creneau in extraction.creneaux %}
-    <tr>
-      <td>{{ creneau.date.strftime("%d/%m/%Y") }}</td>
-      <td>{{ creneau.debut }}</td>
-      <td>{{ creneau.fin }}</td>
-      <td>{{ creneau.lieu }}</td>
-      <td>{{ creneau.duration_hours }} h</td>
-    </tr>
-    {% endfor %}
-  </tbody>
-</table>
+<div class="table-scroll">
+  <table>
+    <thead>
+      <tr><th>Date</th><th>Début</th><th>Fin</th><th>Lieu</th><th>Durée</th></tr>
+    </thead>
+    <tbody>
+      {% for creneau in extraction.creneaux %}
+      <tr>
+        <td>{{ creneau.date.strftime("%d/%m/%Y") }}</td>
+        <td>{{ creneau.debut }}</td>
+        <td>{{ creneau.fin }}</td>
+        <td>{{ creneau.lieu }}</td>
+        <td>{{ creneau.duration_hours }} h</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
 {% else %}
 <p>Aucun créneau de travail sur cette période (semaine de repos).</p>
 {% endif %}
 
 <h2>Anciens événements sur cette période</h2>
 {% if existing_events is none %}
-<p>Impossible de vérifier les anciens événements pour l'instant.</p>
+<p class="muted">Impossible de vérifier les anciens événements pour l'instant.</p>
 {% elif existing_events %}
 <p>{{ existing_events | length }} événement(s) déjà importé(s), qui seront remplacés à la
   validation :</p>
@@ -45,17 +47,19 @@
   {% endfor %}
 </ul>
 {% else %}
-<p>Aucun événement déjà importé sur cette période.</p>
+<p class="muted">Aucun événement déjà importé sur cette période.</p>
 {% endif %}
 
-{% if sync_error %}<p><strong>{{ sync_error }}</strong></p>{% endif %}
-<form action="/upload/{{ upload_id }}/confirm" method="post">
-  <button type="submit">Valider</button>
-</form>
+{% if sync_error %}<p class="error">{{ sync_error }}</p>{% endif %}
+<div class="actions">
+  <form action="/upload/{{ upload_id }}/confirm" method="post">
+    <button type="submit">Valider</button>
+  </form>
+</div>
 {% endif %}
 
-<p>Ce n'est pas la bonne ligne ?</p>
-<p>
+<p class="page-links">
+  Ce n'est pas la bonne ligne ?
   <a href="/upload/{{ upload_id }}/name">Changer le nom recherché</a> ·
   <a href="/upload/{{ upload_id }}/manual">Recadrer à la main</a> ·
   <a href="/upload">Déposer un autre PDF</a>

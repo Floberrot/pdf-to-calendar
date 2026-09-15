@@ -3,9 +3,23 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
   <title>{% block title %}Planning → Agenda{% endblock %}</title>
+  <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-  {% block content %}{% endblock %}
+  <header class="site-header">
+    <div class="wrap site-header__inner">
+      <a class="brand" href="/">Planning → Agenda</a>
+      <nav class="site-nav">
+        <span class="site-nav__user">{{ user.name }}</span>
+        {% if user.is_admin %}<a href="/admin">Admin</a>{% endif %}
+        <a href="/auth/logout">Se déconnecter</a>
+      </nav>
+    </div>
+  </header>
+  <main class="wrap">
+    {% block content %}{% endblock %}
+  </main>
 </body>
 </html>

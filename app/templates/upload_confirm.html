@@ -2,9 +2,9 @@
 {% block title %}Importé{% endblock %}
 {% block content %}
 <h1>C'est fait</h1>
-<p>
+<p class="success">
   {{ inserted_count }} créneau{{ "x" if inserted_count > 1 else "" }} ajouté{{ "s" if inserted_count > 1 else "" }} à l'agenda.
   {% if replaced_count %}{{ replaced_count }} ancien événement{{ "s" if replaced_count > 1 else "" }} remplacé{{ "s" if replaced_count > 1 else "" }}.{% endif %}
 </p>
-<p><a href="/upload">Déposer un autre PDF</a></p>
+<p><a class="button" href="/upload">Déposer un autre PDF</a></p>
 {% endblock %}

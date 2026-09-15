@@ -5,15 +5,15 @@
 <h1>Trace un rectangle autour de l'en-tête et de ta ligne</h1>
 
 {% if page_count > 1 %}
-<p>
+<p class="muted">
   Page {{ page_number }} / {{ page_count }}
   {% if page_number > 1 %} · <a href="/upload/{{ upload_id }}/manual?page={{ page_number - 1 }}">précédente</a>{% endif %}
   {% if page_number < page_count %} · <a href="/upload/{{ upload_id }}/manual?page={{ page_number + 1 }}">suivante</a>{% endif %}
 </p>
 {% endif %}
 
-<div style="max-width: 900px;">
-  <img id="crop-image" src="/upload/{{ upload_id }}/image/page_{{ page_number }}.png" style="max-width: 100%;">
+<div class="crop-wrap">
+  <img id="crop-image" src="/upload/{{ upload_id }}/image/page_{{ page_number }}.png">
 </div>
 
 <form id="crop-form" action="/upload/{{ upload_id }}/manual" method="post">
