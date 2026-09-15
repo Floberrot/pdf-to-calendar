@@ -277,6 +277,25 @@ def test_sync_inserts_all_day_event_for_jour_incertain():
     assert body["description"] == "ASTR"
     assert body["summary"] == "Sophie Martin — à vérifier"
     assert body["extendedProperties"]["private"] == {"app": APP_TAG, "email": "ami@example.com"}
+    assert "colorId" in body
+
+
+def test_jour_incertain_gets_same_color_as_creneaux_for_same_person():
+    """Retour utilisateur : la couleur doit rester identique pour une
+    personne, quel que soit le type d'événement (créneau normal ou jour à
+    vérifier)."""
+    calls: list[dict] = []
+    service = _FakeService([], calls)
+    extraction = _extraction(
+        (date(2026, 9, 15), "09:00", "17:00", ""),
+        jours_incertains=[JourIncertain(date=date(2026, 9, 16), texte="ASTR")],
+    )
+
+    sync_to_calendar("ami@example.com", "Sophie Martin", extraction, service=service)
+
+    insert_calls = [call for call in calls if call["op"] == "insert"]
+    colors = {call["body"]["colorId"] for call in insert_calls}
+    assert len(colors) == 1
 
 
 def test_sync_jour_incertain_without_texte_uses_fallback_description():
