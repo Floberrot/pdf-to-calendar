@@ -11,6 +11,14 @@
   ton prénom et nom Google ({{ user.given_name or "?" }} {{ user.family_name or "?" }}).
   {% endif %}
 </p>
+<p class="muted">
+  Important : tape le nom exactement comme il est écrit sur ton planning, à
+  l'endroit de ta ligne (même ordre, mêmes mots — « DUPONT Jean » et « Jean
+  DUPONT » ne donnent pas le même résultat si le PDF n'utilise que l'un des
+  deux). Si seul ton prénom y apparaît, tape seulement ton prénom. Une fois
+  enregistré, ce nom est utilisé tel quel, sans variante essayée
+  automatiquement.
+</p>
 
 {% if saved %}<p class="success">Enregistré.</p>{% endif %}
 
