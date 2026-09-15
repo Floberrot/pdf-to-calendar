@@ -6,6 +6,12 @@
   {{ inserted_count }} créneau{{ "x" if inserted_count > 1 else "" }} ajouté{{ "s" if inserted_count > 1 else "" }} à l'agenda.
   {% if replaced_count %}{{ replaced_count }} ancien événement{{ "s" if replaced_count > 1 else "" }} remplacé{{ "s" if replaced_count > 1 else "" }}.{% endif %}
 </p>
+{% if uncertain_count %}
+<p class="muted">
+  Dont {{ uncertain_count }} jour{{ "s" if uncertain_count > 1 else "" }} à vérifier (case pas
+  claire sur le planning) : à compléter toi-même dans l'agenda.
+</p>
+{% endif %}
 <div class="actions">
   <a class="button" href="https://calendar.google.com/calendar/" target="_blank" rel="noopener">Ouvrir l'agenda</a>
   <a href="/upload">Déposer un autre PDF</a>

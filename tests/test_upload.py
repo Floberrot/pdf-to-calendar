@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
@@ -48,7 +48,11 @@ def _default_calendar_lister(email, periode_debut, periode_fin) -> list[Existing
 
 
 def _default_calendar_syncer(email, name, extraction) -> SyncResult:
-    return SyncResult(inserted_count=len(extraction.creneaux), replaced_count=0)
+    return SyncResult(
+        inserted_count=len(extraction.creneaux),
+        replaced_count=0,
+        uncertain_count=len(extraction.jours_incertains),
+    )
 
 
 def _override_user(*, given_name: str = "Sophie", family_name: str = "MARTIN") -> None:
@@ -116,6 +120,30 @@ def test_upload_pdf_success_shows_creneaux_table(client, tmp_path):
     assert "09:00" in response.text
     assert "17:00" in response.text
     assert "Site B" in response.text
+
+
+def test_upload_shows_jours_incertains_in_preview(client, tmp_path):
+    """Retour utilisateur : une case non vide mais pas reconnue (ni horaire
+    clair, ni absence habituelle) ne doit pas être perdue en silence."""
+
+    def _extractor_with_jour_incertain(image_png: bytes) -> dict:
+        payload = _fake_extraction_payload()
+        creneau_date = date.fromisoformat(payload["creneaux"][0]["date"])
+        jour_date = creneau_date + timedelta(days=1)
+        payload["jours_incertains"] = [{"date": jour_date.isoformat(), "texte": "ASTR"}]
+        return payload
+
+    _override_user(given_name="Sophie", family_name="MARTIN")
+    app.dependency_overrides[get_extractor] = lambda: _extractor_with_jour_incertain
+    pdf_path = tmp_path / "planning.pdf"
+    _build_planning_pdf(pdf_path)
+
+    with open(pdf_path, "rb") as f:
+        response = client.post("/upload", files={"file": ("planning.pdf", f, "application/pdf")})
+
+    assert response.status_code == 200
+    assert "Jours à vérifier" in response.text
+    assert "ASTR" in response.text
 
 
 def test_upload_sends_redacted_image_to_model_but_shows_original(client, tmp_path):
@@ -483,6 +511,29 @@ def test_confirm_success_shows_summary_and_purges_upload(client, tmp_path):
 
     # Le dossier d'upload est purgé après une validation réussie.
     assert client.get(f"/upload/{upload_id}/manual").status_code == 404
+
+
+def test_confirm_shows_uncertain_count_when_present(client, tmp_path):
+    def _extractor_with_jour_incertain(image_png: bytes) -> dict:
+        payload = _fake_extraction_payload()
+        creneau_date = date.fromisoformat(payload["creneaux"][0]["date"])
+        jour_date = creneau_date + timedelta(days=1)
+        payload["jours_incertains"] = [{"date": jour_date.isoformat(), "texte": "ASTR"}]
+        return payload
+
+    _override_user(given_name="Sophie", family_name="MARTIN")
+    app.dependency_overrides[get_extractor] = lambda: _extractor_with_jour_incertain
+    pdf_path = tmp_path / "planning.pdf"
+    _build_planning_pdf(pdf_path)
+
+    with open(pdf_path, "rb") as f:
+        preview = client.post("/upload", files={"file": ("planning.pdf", f, "application/pdf")})
+    upload_id = _upload_id_from(preview.text, suffix="name")
+
+    response = client.post(f"/upload/{upload_id}/confirm")
+
+    assert response.status_code == 200
+    assert "1 jour à vérifier" in response.text
 
 
 def test_confirm_without_prior_preview_returns_404(client, tmp_path):

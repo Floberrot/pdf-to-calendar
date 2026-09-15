@@ -19,7 +19,7 @@ from app.calendar_sync import (
     sync_to_calendar,
 )
 from app.settings import settings
-from app.validate import Creneau, ValidatedExtraction
+from app.validate import Creneau, JourIncertain, ValidatedExtraction
 
 
 class _FakeExecutable:
@@ -103,13 +103,16 @@ def _old_event(event_id: str, start_date: str, end_date: str) -> dict:
     return {"id": event_id, "summary": "", "start": {"date": start_date}, "end": {"date": end_date}}
 
 
-def _extraction(*creneaux_args) -> ValidatedExtraction:
+def _extraction(*creneaux_args, jours_incertains=()) -> ValidatedExtraction:
     creneaux = [
         Creneau(date=d, debut=debut, fin=fin, lieu=lieu, duration_hours=1)
         for d, debut, fin, lieu in creneaux_args
     ]
     return ValidatedExtraction(
-        periode_debut=date(2026, 9, 14), periode_fin=date(2026, 9, 20), creneaux=creneaux
+        periode_debut=date(2026, 9, 14),
+        periode_fin=date(2026, 9, 20),
+        creneaux=creneaux,
+        jours_incertains=list(jours_incertains),
     )
 
 
@@ -258,6 +261,64 @@ def test_sync_overnight_creneau_ends_next_day():
     insert_call = next(call for call in calls if call["op"] == "insert")
     assert insert_call["body"]["start"]["dateTime"] == "2026-09-15T21:00:00"
     assert insert_call["body"]["end"]["dateTime"] == "2026-09-16T07:00:00"
+
+
+def test_sync_inserts_all_day_event_for_jour_incertain():
+    calls: list[dict] = []
+    service = _FakeService([], calls)
+    extraction = _extraction(jours_incertains=[JourIncertain(date=date(2026, 9, 16), texte="ASTR")])
+
+    sync_to_calendar("ami@example.com", "Sophie Martin", extraction, service=service)
+
+    insert_call = next(call for call in calls if call["op"] == "insert")
+    body = insert_call["body"]
+    assert body["start"] == {"date": "2026-09-16"}
+    assert body["end"] == {"date": "2026-09-17"}
+    assert body["description"] == "ASTR"
+    assert body["summary"] == "Sophie Martin — à vérifier"
+    assert body["extendedProperties"]["private"] == {"app": APP_TAG, "email": "ami@example.com"}
+
+
+def test_sync_jour_incertain_without_texte_uses_fallback_description():
+    calls: list[dict] = []
+    service = _FakeService([], calls)
+    extraction = _extraction(jours_incertains=[JourIncertain(date=date(2026, 9, 16), texte="")])
+
+    sync_to_calendar("ami@example.com", "Sophie Martin", extraction, service=service)
+
+    insert_call = next(call for call in calls if call["op"] == "insert")
+    assert insert_call["body"]["description"]
+
+
+def test_sync_counts_creneaux_and_jours_incertains_separately():
+    service = _FakeService([], [])
+    extraction = _extraction(
+        (date(2026, 9, 15), "09:00", "17:00", ""),
+        jours_incertains=[
+            JourIncertain(date=date(2026, 9, 16), texte="ASTR"),
+            JourIncertain(date=date(2026, 9, 17), texte="???"),
+        ],
+    )
+
+    result = sync_to_calendar("ami@example.com", "Sophie Martin", extraction, service=service)
+
+    assert result == SyncResult(inserted_count=1, replaced_count=0, uncertain_count=2)
+
+
+def test_sync_rolls_back_everything_when_jour_incertain_insertion_fails():
+    old_items = [_old_event("old1", "2026-09-15", "2026-09-16")]
+    calls: list[dict] = []
+    service = _FakeService(old_items, calls, fail_on_insert_index=1)
+    extraction = _extraction(
+        (date(2026, 9, 15), "09:00", "17:00", ""),
+        jours_incertains=[JourIncertain(date=date(2026, 9, 16), texte="ASTR")],
+    )
+
+    result = sync_to_calendar("ami@example.com", "Sophie Martin", extraction, service=service)
+
+    assert isinstance(result, SyncError)
+    deleted_ids = [call["eventId"] for call in calls if call["op"] == "delete"]
+    assert deleted_ids == ["new0"]
 
 
 def test_sync_rolls_back_inserted_events_when_one_insertion_fails():
