@@ -14,6 +14,8 @@ import tempfile
 import time
 import uuid
 from collections.abc import Callable
+from dataclasses import dataclass
+from datetime import date, datetime
 from pathlib import Path
 from typing import Annotated
 
@@ -26,6 +28,7 @@ from app.calendar_sync import (
     ExistingEvent,
     SyncError,
     SyncResult,
+    format_heure,
     list_existing_events,
     sync_to_calendar,
 )
@@ -36,7 +39,7 @@ from app.pdf.crop import compose_crop, crop_manual, redact_name
 from app.pdf.locate import LocateResult, build_candidates, locate
 from app.pdf.render import render_pages
 from app.settings import settings
-from app.validate import ValidatedExtraction, ValidationError, validate
+from app.validate import Creneau, ValidatedExtraction, ValidationError, validate
 
 logger = logging.getLogger("app")
 
@@ -141,6 +144,74 @@ def _save_pdf_name_if_new(
         set_pdf_name(user.email, candidate_used)
 
 
+@dataclass(frozen=True)
+class ExistingEventView:
+    """Un `ExistingEvent` prêt pour l'affichage (demande utilisateur : les
+    heures brutes de l'API étaient illisibles, et on ne voyait pas ce qui
+    changeait par rapport aux créneaux sur le point d'être importés)."""
+
+    summary: str
+    range_display: str
+    status: str  # "identique", "modifie" ou "supprime"
+
+
+def _parse_event_moment(value: str) -> datetime | None:
+    """None si `value` est une date sans heure (événement journée entière) :
+    rien à comparer aux horaires d'un créneau dans ce cas."""
+    if "T" not in value:
+        return None
+    return datetime.fromisoformat(value)
+
+
+def _format_event_range(event: ExistingEvent) -> str:
+    """« 15/09/2026 · 9h-17h30 », ou « 16/09/2026 (journée entière) » pour
+    un événement sans heure."""
+    start = _parse_event_moment(event.start)
+    if start is None:
+        return f"{date.fromisoformat(event.start).strftime('%d/%m/%Y')} (journée entière)"
+    end = _parse_event_moment(event.end)
+    debut = format_heure(start.strftime("%H:%M"))
+    fin = format_heure(end.strftime("%H:%M"))
+    if end.date() != start.date():
+        return f"{start.strftime('%d/%m/%Y')} {debut} → {end.strftime('%d/%m/%Y')} {fin}"
+    return f"{start.strftime('%d/%m/%Y')} · {debut}-{fin}"
+
+
+def _event_status(event: ExistingEvent, creneaux: list[Creneau]) -> str:
+    """« identique », « modifie » ou « supprime » : compare un événement déjà
+    présent aux créneaux sur le point d'être importés."""
+    start = _parse_event_moment(event.start)
+    if start is None:
+        return "modifie"
+    same_day = [c for c in creneaux if c.date == start.date()]
+    if not same_day:
+        return "supprime"
+    end = _parse_event_moment(event.end)
+    debut, fin = start.strftime("%H:%M"), end.strftime("%H:%M")
+    if any(c.debut == debut and c.fin == fin for c in same_day):
+        return "identique"
+    return "modifie"
+
+
+def _fetch_existing_event_views(
+    calendar_lister: Callable[..., list[ExistingEvent]],
+    user: CurrentUser,
+    extraction: ValidatedExtraction,
+) -> list[ExistingEventView] | None:
+    try:
+        events = calendar_lister(user.email, extraction.periode_debut, extraction.periode_fin)
+        return [
+            ExistingEventView(
+                summary=event.summary,
+                range_display=_format_event_range(event),
+                status=_event_status(event, extraction.creneaux),
+            )
+            for event in events
+        ]
+    except Exception:  # noqa: BLE001 - API/formatage, ne doit pas casser la prévisualisation
+        return None
+
+
 def _render_preview(
     request: Request,
     user: CurrentUser,
@@ -149,7 +220,7 @@ def _render_preview(
     matched_text: str | None,
     extraction: ValidatedExtraction | None,
     error_message: str | None,
-    existing_events: list[ExistingEvent] | None,
+    existing_events: list[ExistingEventView] | None,
     sync_error: str | None = None,
 ):
     return templates.TemplateResponse(
@@ -225,12 +296,7 @@ def _build_preview(
 
     (upload_dir / EXTRACTION_CACHE_NAME).write_text(json.dumps(raw), encoding="utf-8")
 
-    try:
-        existing_events = calendar_lister(
-            user.email, extraction.periode_debut, extraction.periode_fin
-        )
-    except Exception:  # noqa: BLE001 - API externe, ne doit pas casser la prévisualisation
-        existing_events = None
+    existing_events = _fetch_existing_event_views(calendar_lister, user, extraction)
 
     return _render_preview(
         request,
@@ -480,12 +546,7 @@ def confirm(
             status="error",
             detail={"erreur": result.detail},
         )
-        try:
-            existing_events = calendar_lister(
-                user.email, extraction.periode_debut, extraction.periode_fin
-            )
-        except Exception:  # noqa: BLE001 - API externe, ne doit pas casser la prévisualisation
-            existing_events = None
+        existing_events = _fetch_existing_event_views(calendar_lister, user, extraction)
         return _render_preview(
             request,
             user,
