@@ -9,10 +9,10 @@ from reportlab.lib.pagesizes import A4, landscape
 from reportlab.pdfgen import canvas
 
 from app.auth import CurrentUser, require_user
-from app.calendar_sync import ExistingEvent
+from app.calendar_sync import ExistingEvent, SyncError, SyncResult
 from app.llm import ExtractError
 from app.main import app
-from app.upload import ERROR_MESSAGES, get_calendar_lister, get_extractor
+from app.upload import ERROR_MESSAGES, get_calendar_lister, get_calendar_syncer, get_extractor
 
 PAGE_SIZE = landscape(A4)
 
@@ -46,6 +46,10 @@ def _default_calendar_lister(email, periode_debut, periode_fin) -> list[Existing
     return []
 
 
+def _default_calendar_syncer(email, name, extraction) -> SyncResult:
+    return SyncResult(inserted_count=len(extraction.creneaux), replaced_count=0)
+
+
 def _override_user(*, given_name: str = "Sophie", family_name: str = "MARTIN") -> None:
     app.dependency_overrides[require_user] = lambda: CurrentUser(
         email="ami@example.com",
@@ -56,6 +60,13 @@ def _override_user(*, given_name: str = "Sophie", family_name: str = "MARTIN") -
     )
     app.dependency_overrides[get_extractor] = lambda: _default_extractor
     app.dependency_overrides[get_calendar_lister] = lambda: _default_calendar_lister
+    app.dependency_overrides[get_calendar_syncer] = lambda: _default_calendar_syncer
+
+
+def _upload_id_from(response_text: str, *, suffix: str) -> str:
+    match = re.search(rf"/upload/([a-f0-9]+)/{suffix}", response_text)
+    assert match is not None, f"pas de lien .../{suffix} dans la reponse"
+    return match.group(1)
 
 
 def _build_planning_pdf(path) -> None:
@@ -238,3 +249,84 @@ def test_manual_crop_unknown_upload_id_returns_404(client):
     _override_user()
     response = client.get("/upload/does-not-exist/manual")
     assert response.status_code == 404
+
+
+def test_confirm_shows_valider_button_after_successful_preview(client, tmp_path):
+    """Plan section 5E : bouton Valider disponible sur la prévisualisation."""
+    _override_user(given_name="Sophie", family_name="MARTIN")
+    pdf_path = tmp_path / "planning.pdf"
+    _build_planning_pdf(pdf_path)
+
+    with open(pdf_path, "rb") as f:
+        response = client.post("/upload", files={"file": ("planning.pdf", f, "application/pdf")})
+
+    upload_id = _upload_id_from(response.text, suffix="name")
+    assert f'action="/upload/{upload_id}/confirm"' in response.text
+
+
+def test_confirm_success_shows_summary_and_purges_upload(client, tmp_path):
+    _override_user(given_name="Sophie", family_name="MARTIN")
+    pdf_path = tmp_path / "planning.pdf"
+    _build_planning_pdf(pdf_path)
+
+    with open(pdf_path, "rb") as f:
+        preview = client.post("/upload", files={"file": ("planning.pdf", f, "application/pdf")})
+    upload_id = _upload_id_from(preview.text, suffix="name")
+
+    response = client.post(f"/upload/{upload_id}/confirm")
+
+    assert response.status_code == 200
+    assert "C'est fait" in response.text
+    assert "1 créneau" in response.text
+
+    # Le dossier d'upload est purgé après une validation réussie.
+    assert client.get(f"/upload/{upload_id}/manual").status_code == 404
+
+
+def test_confirm_without_prior_preview_returns_404(client, tmp_path):
+    """Rien à valider si la prévisualisation a échoué (pas d'extraction en cache)."""
+
+    def _broken_extractor(image_png: bytes) -> dict:
+        raise ExtractError("panne simulée")
+
+    _override_user(given_name="Sophie", family_name="MARTIN")
+    app.dependency_overrides[get_extractor] = lambda: _broken_extractor
+    pdf_path = tmp_path / "planning.pdf"
+    _build_planning_pdf(pdf_path)
+
+    with open(pdf_path, "rb") as f:
+        preview = client.post("/upload", files={"file": ("planning.pdf", f, "application/pdf")})
+    upload_id = _upload_id_from(preview.text, suffix="name")
+
+    response = client.post(f"/upload/{upload_id}/confirm")
+
+    assert response.status_code == 404
+
+
+def test_confirm_unknown_upload_id_returns_404(client):
+    _override_user()
+    response = client.post("/upload/does-not-exist/confirm")
+    assert response.status_code == 404
+
+
+def test_confirm_sync_failure_shows_error_and_keeps_upload(client, tmp_path):
+    def _failing_syncer(email, name, extraction):
+        return SyncError("panne agenda simulée")
+
+    _override_user(given_name="Sophie", family_name="MARTIN")
+    app.dependency_overrides[get_calendar_syncer] = lambda: _failing_syncer
+    pdf_path = tmp_path / "planning.pdf"
+    _build_planning_pdf(pdf_path)
+
+    with open(pdf_path, "rb") as f:
+        preview = client.post("/upload", files={"file": ("planning.pdf", f, "application/pdf")})
+    upload_id = _upload_id_from(preview.text, suffix="name")
+
+    response = client.post(f"/upload/{upload_id}/confirm")
+
+    assert response.status_code == 200
+    assert "panne agenda simulée" in response.text
+    # Jamais d'ecriture partielle visible : la previsualisation reste
+    # disponible pour reessayer, le dossier d'upload n'est pas purge.
+    assert "09:00" in response.text
+    assert client.get(f"/upload/{upload_id}/manual").status_code == 200

@@ -6,6 +6,7 @@ d'upload (voir description de la PR).
 
 from __future__ import annotations
 
+import json
 import shutil
 import tempfile
 import time
@@ -19,14 +20,22 @@ from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from app.auth import CurrentUser, require_user
-from app.calendar_sync import ExistingEvent, list_existing_events
+from app.calendar_sync import (
+    ExistingEvent,
+    SyncError,
+    SyncResult,
+    list_existing_events,
+    sync_to_calendar,
+)
 from app.db import get_last_crop, get_pdf_name, set_last_crop, set_pdf_name
 from app.llm import ExtractError, extract
 from app.pdf.crop import compose_crop, crop_manual
 from app.pdf.locate import LocateResult, build_candidates, locate
 from app.pdf.render import render_pages
 from app.settings import settings
-from app.validate import ValidationError, validate
+from app.validate import ValidatedExtraction, ValidationError, validate
+
+EXTRACTION_CACHE_NAME = "extraction.json"
 
 router = APIRouter(prefix="/upload", tags=["upload"])
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
@@ -61,6 +70,11 @@ def get_extractor() -> Callable[..., dict]:
 def get_calendar_lister() -> Callable[..., list[ExistingEvent]]:
     """Point d'injection pour les tests (client agenda factice)."""
     return list_existing_events
+
+
+def get_calendar_syncer() -> Callable[..., SyncResult | SyncError]:
+    """Point d'injection pour les tests (client agenda factice)."""
+    return sync_to_calendar
 
 
 def _purge_old_uploads() -> None:
@@ -115,37 +129,17 @@ def _save_pdf_name_if_new(
         set_pdf_name(user.email, candidate_used)
 
 
-def _build_preview(
+def _render_preview(
     request: Request,
     user: CurrentUser,
     upload_id: str,
-    composed_path: Path,
     *,
     matched_text: str | None,
-    extractor: Callable[..., dict],
-    calendar_lister: Callable[..., list[ExistingEvent]],
+    extraction: ValidatedExtraction | None,
+    error_message: str | None,
+    existing_events: list[ExistingEvent] | None,
+    sync_error: str | None = None,
 ):
-    """Appelle le modèle puis la validation locale (plan, sections 5C/5D),
-    et liste les événements que la validation à venir (Phase 4) remplacera."""
-    try:
-        raw = extractor(composed_path.read_bytes())
-        extraction = validate(raw, validation_weeks=settings.validation_weeks)
-    except ExtractError:
-        extraction = ValidationError("extraction_echouee")
-
-    existing_events: list[ExistingEvent] | None = None
-    error_message = None
-    if isinstance(extraction, ValidationError):
-        error_message = ERROR_MESSAGES[extraction.reason]
-        extraction = None
-    else:
-        try:
-            existing_events = calendar_lister(
-                user.email, extraction.periode_debut, extraction.periode_fin
-            )
-        except Exception:  # noqa: BLE001 - API externe, ne doit pas casser la prévisualisation
-            existing_events = None
-
     return templates.TemplateResponse(
         request,
         "upload_result.html",
@@ -156,7 +150,62 @@ def _build_preview(
             "extraction": extraction,
             "error_message": error_message,
             "existing_events": existing_events,
+            "sync_error": sync_error,
         },
+    )
+
+
+def _build_preview(
+    request: Request,
+    user: CurrentUser,
+    upload_id: str,
+    upload_dir: Path,
+    composed_path: Path,
+    *,
+    matched_text: str | None,
+    extractor: Callable[..., dict],
+    calendar_lister: Callable[..., list[ExistingEvent]],
+):
+    """Appelle le modèle puis la validation locale (plan, sections 5C/5D).
+
+    L'extraction brute est mise en cache dans le dossier d'upload : le
+    bouton Valider (Phase 4) réutilise exactement ce qui a été montré ici,
+    sans rappeler le modèle (ses réponses ne sont pas garanties identiques
+    d'un appel à l'autre)."""
+    try:
+        raw = extractor(composed_path.read_bytes())
+        extraction = validate(raw, validation_weeks=settings.validation_weeks)
+    except ExtractError:
+        extraction = ValidationError("extraction_echouee")
+
+    if isinstance(extraction, ValidationError):
+        return _render_preview(
+            request,
+            user,
+            upload_id,
+            matched_text=matched_text,
+            extraction=None,
+            error_message=ERROR_MESSAGES[extraction.reason],
+            existing_events=None,
+        )
+
+    (upload_dir / EXTRACTION_CACHE_NAME).write_text(json.dumps(raw), encoding="utf-8")
+
+    try:
+        existing_events = calendar_lister(
+            user.email, extraction.periode_debut, extraction.periode_fin
+        )
+    except Exception:  # noqa: BLE001 - API externe, ne doit pas casser la prévisualisation
+        existing_events = None
+
+    return _render_preview(
+        request,
+        user,
+        upload_id,
+        matched_text=matched_text,
+        extraction=extraction,
+        error_message=None,
+        existing_events=existing_events,
     )
 
 
@@ -178,6 +227,7 @@ def _result_response(
         request,
         user,
         upload_id,
+        upload_dir,
         composed_path,
         matched_text=result.matched_text,
         extractor=extractor,
@@ -344,10 +394,69 @@ def manual_crop_submit(
         request,
         user,
         upload_id,
+        upload_dir,
         composed_path,
         matched_text=None,
         extractor=extractor,
         calendar_lister=calendar_lister,
+    )
+
+
+@router.post("/{upload_id}/confirm")
+def confirm(
+    request: Request,
+    user: Annotated[CurrentUser, Depends(require_user)],
+    upload_id: str,
+    calendar_lister: Annotated[Callable[..., list[ExistingEvent]], Depends(get_calendar_lister)],
+    calendar_syncer: Annotated[Callable[..., SyncResult | SyncError], Depends(get_calendar_syncer)],
+):
+    """Écrit dans l'agenda l'extraction montrée en prévisualisation (plan,
+    section 6). Rejoue la validation sur l'extraction mise en cache plutôt
+    que de faire confiance à un upload_id : une prévisualisation périmée ou
+    déjà validée ne doit pas pouvoir réécrire l'agenda."""
+    upload_dir = _upload_dir(request, upload_id)
+    raw_path = upload_dir / EXTRACTION_CACHE_NAME
+    if not raw_path.is_file():
+        raise HTTPException(
+            status_code=404, detail="Prévisualisation expirée, dépose le PDF à nouveau."
+        )
+
+    raw = json.loads(raw_path.read_text(encoding="utf-8"))
+    extraction = validate(raw, validation_weeks=settings.validation_weeks)
+    if isinstance(extraction, ValidationError):
+        raise HTTPException(
+            status_code=409, detail="Prévisualisation périmée, dépose le PDF à nouveau."
+        )
+
+    result = calendar_syncer(user.email, user.name, extraction)
+
+    if isinstance(result, SyncError):
+        try:
+            existing_events = calendar_lister(
+                user.email, extraction.periode_debut, extraction.periode_fin
+            )
+        except Exception:  # noqa: BLE001 - API externe, ne doit pas casser la prévisualisation
+            existing_events = None
+        return _render_preview(
+            request,
+            user,
+            upload_id,
+            matched_text=None,
+            extraction=extraction,
+            error_message=None,
+            existing_events=existing_events,
+            sync_error=result.detail,
+        )
+
+    shutil.rmtree(upload_dir, ignore_errors=True)
+    return templates.TemplateResponse(
+        request,
+        "upload_confirm.html",
+        {
+            "user": user,
+            "inserted_count": result.inserted_count,
+            "replaced_count": result.replaced_count,
+        },
     )
 
 
