@@ -2,13 +2,7 @@
 
 Importe le PDF de planning d'une personne vers un agenda Google partagé. Elle
 se connecte avec Google, dépose son PDF, vérifie les créneaux détectés dans
-une prévisualisation, valide. Le plan complet fait autorité :
-[`plan-planning-vers-agenda-v4.md`](./plan-planning-vers-agenda-v4.md).
-
-État actuel : **Phase 1 — Socle** (FastAPI, authentification Google,
-tables SQLite, journal). Les phases suivantes (localisation du PDF, appel au
-modèle, écriture dans l'agenda, page admin complète) ne sont pas encore
-implémentées.
+une prévisualisation, valide.
 
 ## Développement local
 
@@ -59,7 +53,7 @@ ni protégée contre les push directs, ni déployée, ni utilisable.
    si `.github/workflows/ci.yml` avec `push: branches: [main]` existe déjà).
 8. `Cmd+K → Deploy latest commit`. Ouvrir `https://<domaine>/health`.
 
-### Google Cloud / Google Agenda (plan, section 8)
+### Google Cloud / Google Agenda
 
 9. Créer l'agenda partagé depuis votre compte Gmail, dans Google Agenda.
 10. Sur console.cloud.google.com : créer un projet, activer l'API Google
@@ -82,8 +76,6 @@ Ensuite, chaque merge sur `main` est un déploiement, sans rien toucher.
 Une variable à changer se modifie dans Railway, qui redéploie.
 
 ## Structure
-
-Voir section 9 du plan. Deux modules n'y sont pas listés explicitement :
 
 - `app/db.py` : connexion SQLite (schéma, tables) partagée entre `log.py` et `auth.py`
 - `app/upload.py` : routes de dépôt du PDF, orchestration `locate` → `crop`,
