@@ -7,11 +7,14 @@ from __future__ import annotations
 
 from datetime import date
 
+import pytest
+
 from app.calendar_sync import (
     APP_TAG,
     ExistingEvent,
     SyncError,
     SyncResult,
+    health_check,
     list_existing_events,
     sync_to_calendar,
 )
@@ -34,11 +37,19 @@ class _FailingExecutable:
 
 class _FakeEvents:
     def __init__(
-        self, items: list[dict], calls: list[dict], *, fail_on_insert_index: int | None = None
+        self,
+        items: list[dict],
+        calls: list[dict],
+        *,
+        fail_on_insert_index: int | None = None,
+        fail_on_get: bool = False,
+        fail_on_delete: bool = False,
     ):
         self._items = items
         self._calls = calls
         self._fail_on_insert_index = fail_on_insert_index
+        self._fail_on_get = fail_on_get
+        self._fail_on_delete = fail_on_delete
         self._insert_count = 0
 
     def list(self, **kwargs):
@@ -53,16 +64,36 @@ class _FakeEvents:
             return _FailingExecutable()
         return _FakeExecutable({"id": f"new{index}"})
 
+    def get(self, **kwargs):
+        self._calls.append({"op": "get", **kwargs})
+        if self._fail_on_get:
+            return _FailingExecutable()
+        return _FakeExecutable({"id": kwargs.get("eventId")})
+
     def delete(self, **kwargs):
         self._calls.append({"op": "delete", **kwargs})
+        if self._fail_on_delete:
+            return _FailingExecutable()
         return _FakeExecutable({})
 
 
 class _FakeService:
     def __init__(
-        self, items: list[dict], calls: list[dict], *, fail_on_insert_index: int | None = None
+        self,
+        items: list[dict],
+        calls: list[dict],
+        *,
+        fail_on_insert_index: int | None = None,
+        fail_on_get: bool = False,
+        fail_on_delete: bool = False,
     ):
-        self._events = _FakeEvents(items, calls, fail_on_insert_index=fail_on_insert_index)
+        self._events = _FakeEvents(
+            items,
+            calls,
+            fail_on_insert_index=fail_on_insert_index,
+            fail_on_get=fail_on_get,
+            fail_on_delete=fail_on_delete,
+        )
 
     def events(self) -> _FakeEvents:
         return self._events
@@ -271,3 +302,34 @@ def test_sync_only_deletes_ids_returned_by_the_tagged_listing():
 
     deleted_ids = {call["eventId"] for call in calls if call["op"] == "delete"}
     assert deleted_ids == {"old1", "old2"}
+
+
+def test_health_check_inserts_reads_and_deletes_in_order():
+    calls: list[dict] = []
+    service = _FakeService([], calls)
+
+    health_check(service=service)
+
+    ops = [call["op"] for call in calls]
+    assert ops == ["insert", "get", "delete"]
+
+
+def test_health_check_deletes_even_if_the_read_fails():
+    calls: list[dict] = []
+    service = _FakeService([], calls, fail_on_get=True)
+
+    with pytest.raises(RuntimeError):
+        health_check(service=service)
+
+    ops = [call["op"] for call in calls]
+    assert ops == ["insert", "get", "delete"]
+
+
+def test_health_check_propagates_insert_failure():
+    calls: list[dict] = []
+    service = _FakeService([], calls, fail_on_insert_index=0)
+
+    with pytest.raises(RuntimeError):
+        health_check(service=service)
+
+    assert [call["op"] for call in calls] == ["insert"]
