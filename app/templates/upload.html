@@ -2,10 +2,11 @@
 {% block title %}Déposer un planning{% endblock %}
 {% block content %}
 <h1>Déposer ton planning</h1>
-{% if error %}<p style="color: red;">{{ error }}</p>{% endif %}
+{% if error %}<p class="error">{{ error }}</p>{% endif %}
 <form action="/upload" method="post" enctype="multipart/form-data">
-  <input type="file" name="file" accept="application/pdf" required>
+  <div class="field">
+    <input type="file" name="file" accept="application/pdf" required>
+  </div>
   <button type="submit">Envoyer</button>
 </form>
-<p><a href="/">Retour à l'accueil</a></p>
 {% endblock %}

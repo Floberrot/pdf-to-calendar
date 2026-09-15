@@ -1,8 +1,6 @@
 {% extends "base.html" %}
 {% block title %}Accueil{% endblock %}
 {% block content %}
-<h1>Planning → Agenda</h1>
-<p>Bonjour {{ user.name }}.</p>
-<p><a href="/upload">Déposer ton planning</a></p>
-<p><a href="/auth/logout">Se déconnecter</a></p>
+<h1>Bonjour {{ user.name }}</h1>
+<p><a class="button" href="/upload">Déposer ton planning</a></p>
 {% endblock %}

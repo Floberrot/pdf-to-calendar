@@ -14,8 +14,10 @@ plus précise (ex. « DUPONT J. » plutôt que « DUPONT »).</p>
 <p>Tape le nom tel qu'il apparaît dans le PDF, à l'endroit de ta ligne.</p>
 {% endif %}
 <form action="/upload/{{ upload_id }}/name" method="post">
-  <input type="text" name="pdf_name" required autofocus>
+  <div class="field">
+    <input type="text" name="pdf_name" required autofocus>
+  </div>
   <button type="submit">Valider</button>
 </form>
-<p><a href="/upload/{{ upload_id }}/manual">Recadrer à la main à la place</a></p>
+<p class="page-links"><a href="/upload/{{ upload_id }}/manual">Recadrer à la main à la place</a></p>
 {% endblock %}

@@ -9,6 +9,7 @@ from typing import Annotated
 
 from fastapi import Depends, FastAPI, Request
 from fastapi.responses import RedirectResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
@@ -26,6 +27,7 @@ app.add_middleware(SessionMiddleware, secret_key=settings.session_secret)
 app.include_router(auth_router)
 app.include_router(upload_router)
 app.include_router(admin_router)
+app.mount("/static", StaticFiles(directory=str(Path(__file__).parent / "static")), name="static")
 
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 
