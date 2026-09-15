@@ -161,6 +161,35 @@ def test_locate_handles_full_day_month_year_dates(tmp_path):
     assert result.header.top < result.header.bottom
 
 
+def test_locate_finds_two_word_name_despite_small_vertical_offset(tmp_path):
+    """PDF réel (retour utilisateur) : prénom et nom de famille pas toujours
+    à l'exacte même hauteur (ex. nom de famille dans une police différente
+    pour le distinguer visuellement) — un léger décalage ne doit pas
+    empêcher `_group_lines` de les traiter comme une seule ligne, sans quoi
+    aucun candidat à deux mots ne peut plus jamais matcher. Les fixtures
+    `NAMES` ci-dessus dessinent tout le nom en un seul `drawString`, donc un
+    même « top » pour tous les mots : elles ne pouvaient pas révéler ce cas."""
+    pdf_path = tmp_path / "planning.pdf"
+    c = canvas.Canvas(str(pdf_path), pagesize=PAGE_SIZE)
+    top = PAGE_SIZE[1] - 60
+    for i, date_text in enumerate(DEFAULT_DATES):
+        c.drawString(LEFT + 120 + i * DATE_GAP, top, date_text)
+    y = top - 15
+    c.line(LEFT, y, RIGHT, y)
+    y -= ROW_HEIGHT
+    c.drawString(LEFT, y + 12, "Jean")
+    c.drawString(LEFT + 45, y + 12 - 3.5, "DUPONT")
+    c.line(LEFT, y, RIGHT, y)
+    c.showPage()
+    c.save()
+
+    candidates = build_candidates(pdf_name="Jean DUPONT", family_name="", given_name="")
+    result = locate(str(pdf_path), candidates=candidates)
+
+    assert isinstance(result, LocateResult)
+    assert result.matched_text.upper() == "JEAN DUPONT"
+
+
 def test_locate_few_dates_falls_back(tmp_path):
     pdf_path = tmp_path / "planning.pdf"
     _build_planning_pdf(pdf_path, names=NAMES, dates=["Lun 15", "Mar 16"])
