@@ -50,6 +50,25 @@ def _build_planning_pdf(
     c.save()
 
 
+def _build_pdf_with_empty_cell_after_name(path: Path) -> None:
+    """Ligne « Jean DUPONT » suivie d'un « - » dans la première case (jour de
+    repos), comme sur un vrai planning."""
+    c = canvas.Canvas(str(path), pagesize=PAGE_SIZE)
+    top = PAGE_SIZE[1] - 60
+    for i, date_text in enumerate(DEFAULT_DATES):
+        c.drawString(LEFT + 120 + i * DATE_GAP, top, date_text)
+    y = top - 15
+    c.line(LEFT, y, RIGHT, y)
+    for name in ["MARTIN Sophie", "Jean DUPONT", "BERNARD Paul"]:
+        y -= ROW_HEIGHT
+        c.drawString(LEFT, y + 12, name)
+        if name == "Jean DUPONT":
+            c.drawString(LEFT + 120, y + 12, "-")
+        c.line(LEFT, y, RIGHT, y)
+    c.showPage()
+    c.save()
+
+
 def test_locate_finds_name_line_and_header(tmp_path):
     pdf_path = tmp_path / "planning.pdf"
     _build_planning_pdf(pdf_path, names=NAMES)
@@ -188,6 +207,34 @@ def test_locate_finds_two_word_name_despite_small_vertical_offset(tmp_path):
 
     assert isinstance(result, LocateResult)
     assert result.matched_text.upper() == "JEAN DUPONT"
+
+
+def test_locate_ignores_punctuation_only_cell_after_name(tmp_path):
+    """Retour utilisateur : « jean » seul marchait, « Jean DUPONT » jamais.
+    Cause : le « - » de la case vide qui suit le nom entrait dans une fenêtre
+    de trois mots, « Jean DUPONT - » se normalise comme « Jean DUPONT », et
+    une seule personne passait pour un homonyme (`nom_homonyme`)."""
+    pdf_path = tmp_path / "planning.pdf"
+    _build_pdf_with_empty_cell_after_name(pdf_path)
+
+    candidates = build_candidates(pdf_name="Jean DUPONT", family_name="", given_name="")
+    result = locate(str(pdf_path), candidates=candidates)
+
+    assert isinstance(result, LocateResult)
+    assert result.matched_text == "Jean DUPONT"
+
+
+def test_locate_family_name_next_to_empty_cell_is_not_a_false_homonym(tmp_path):
+    """Même cause, un seul mot : « DUPONT » et « DUPONT - » comptaient pour
+    deux lignes — c'est pourquoi le nom de famille seul échouait aussi, alors
+    que le prénom (rien de vide à sa droite) passait."""
+    pdf_path = tmp_path / "planning.pdf"
+    _build_pdf_with_empty_cell_after_name(pdf_path)
+
+    result = locate(str(pdf_path), candidates=["DUPONT"])
+
+    assert isinstance(result, LocateResult)
+    assert result.matched_text == "DUPONT"
 
 
 def test_locate_few_dates_falls_back(tmp_path):
