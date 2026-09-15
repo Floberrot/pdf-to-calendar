@@ -41,10 +41,12 @@ def account_form(request: Request, user: Annotated[CurrentUser, Depends(require_
 def account_save(
     request: Request,
     user: Annotated[CurrentUser, Depends(require_user)],
-    pdf_name: Annotated[str, Form()],
+    pdf_name: Annotated[str, Form()] = "",
 ):
     """Un champ vide efface l'enregistrement : `build_candidates` retombe
     alors sur la détection automatique (`if pdf_name:` y traite déjà None et
-    "" de la même façon)."""
+    "" de la même façon). Valeur par défaut nécessaire sur `pdf_name` : sans
+    elle, un formulaire soumis avec le champ vide est rejeté (422) plutôt que
+    reçu comme une chaîne vide."""
     set_pdf_name(user.email, pdf_name.strip())
     return _render(request, user, saved=True)
