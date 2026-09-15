@@ -195,6 +195,6 @@ def _delete_events(service: _CalendarService, event_ids: list[str]) -> int:
         try:
             service.events().delete(calendarId=settings.calendar_id, eventId=event_id).execute()
             deleted += 1
-        except Exception:  # noqa: BLE001 - suppression au mieux, ne doit jamais remonter
+        except Exception:  # noqa: BLE001, S110 - suppression au mieux, ne doit jamais remonter
             pass
     return deleted
