@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}Ton profil{% endblock %}
+{% block content %}
+<h1>Nom recherché dans le planning</h1>
+<p>
+  Quand tu déposes un PDF, l'appli cherche ta ligne à partir de ce nom.
+  {% if pdf_name %}
+  En ce moment : <strong>{{ pdf_name }}</strong>.
+  {% else %}
+  Rien d'enregistré pour l'instant : elle essaie automatiquement à partir de
+  ton prénom et nom Google ({{ user.given_name or "?" }} {{ user.family_name or "?" }}).
+  {% endif %}
+</p>
+
+{% if saved %}<p class="success">Enregistré.</p>{% endif %}
+
+<form action="/account" method="post">
+  <div class="field">
+    <input type="text" name="pdf_name" value="{{ pdf_name or '' }}" placeholder="ex. DUPONT J.">
+  </div>
+  <button type="submit">Enregistrer</button>
+</form>
+<p class="muted">Laisse le champ vide et enregistre pour revenir à la détection automatique.</p>
+{% endblock %}

@@ -13,6 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
+from app.account import router as account_router
 from app.admin import router as admin_router
 from app.auth import CurrentUser, RedirectToLogin, require_user
 from app.auth import router as auth_router
@@ -27,6 +28,7 @@ app.add_middleware(SessionMiddleware, secret_key=settings.session_secret)
 app.include_router(auth_router)
 app.include_router(upload_router)
 app.include_router(admin_router)
+app.include_router(account_router)
 app.mount("/static", StaticFiles(directory=str(Path(__file__).parent / "static")), name="static")
 
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
