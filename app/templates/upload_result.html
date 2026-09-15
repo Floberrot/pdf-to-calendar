@@ -38,7 +38,7 @@
 <p>Impossible de vérifier les anciens événements pour l'instant.</p>
 {% elif existing_events %}
 <p>{{ existing_events | length }} événement(s) déjà importé(s), qui seront remplacés à la
-  validation (bouton pas encore disponible, Phase 4) :</p>
+  validation :</p>
 <ul>
   {% for event in existing_events %}
   <li>{{ event.summary }} ({{ event.start }} → {{ event.end }})</li>
@@ -47,6 +47,11 @@
 {% else %}
 <p>Aucun événement déjà importé sur cette période.</p>
 {% endif %}
+
+{% if sync_error %}<p><strong>{{ sync_error }}</strong></p>{% endif %}
+<form action="/upload/{{ upload_id }}/confirm" method="post">
+  <button type="submit">Valider</button>
+</form>
 {% endif %}
 
 <p>Ce n'est pas la bonne ligne ?</p>
