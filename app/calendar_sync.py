@@ -182,12 +182,17 @@ def _insert_jour_incertain(
     """Événement journée entière, pour un jour où la case du planning n'est
     ni un horaire clair ni une absence reconnue (validate.py) : plutôt que de
     perdre l'information, la personne voit le jour dans son agenda et peut y
-    mettre ses propres horaires."""
+    mettre ses propres horaires.
+
+    Même `colorId` que les créneaux normaux (retour utilisateur : la couleur
+    doit rester la même pour une personne, quel que soit le type
+    d'événement)."""
     body: dict[str, Any] = {
         "summary": f"{name} — à vérifier",
         "description": jour.texte or "Case non vide sur le planning, contenu non reconnu.",
         "start": {"date": jour.date.isoformat()},
         "end": {"date": (jour.date + timedelta(days=1)).isoformat()},
+        "colorId": _color_id_for_email(email),
         "reminders": {"useDefault": True},
         "extendedProperties": {"private": {"app": APP_TAG, "email": email}},
     }
