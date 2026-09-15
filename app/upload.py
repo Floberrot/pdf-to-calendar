@@ -43,6 +43,9 @@ EXTRACTION_CACHE_NAME = "extraction.json"
 
 router = APIRouter(prefix="/upload", tags=["upload"])
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
+# Fixe pour la vie du process (charge une fois au demarrage) : global Jinja
+# plutot que reinjecte dans le contexte de chaque TemplateResponse.
+templates.env.globals["llm_model"] = settings.llm_model
 
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 MAX_PAGES = 10
