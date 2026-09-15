@@ -134,7 +134,7 @@ def _run_locate(user: CurrentUser, pdf_path: Path, pdf_name_override: str | None
     candidates = build_candidates(
         pdf_name=pdf_name, family_name=user.family_name, given_name=user.given_name
     )
-    return locate(str(pdf_path), candidates)
+    return locate(str(pdf_path), candidates, fallback_words=pdf_name.split() if pdf_name else ())
 
 
 def _save_pdf_name_if_new(
@@ -396,6 +396,7 @@ async def upload_pdf(
                 "upload_id": upload_id,
                 "reason": result.reason,
                 "matches": result.matches,
+                "tried": None,
             },
         )
 
@@ -412,7 +413,7 @@ def name_form(
     return templates.TemplateResponse(
         request,
         "upload_name.html",
-        {"user": user, "upload_id": upload_id, "reason": None, "matches": ()},
+        {"user": user, "upload_id": upload_id, "reason": None, "matches": (), "tried": None},
     )
 
 
@@ -441,6 +442,22 @@ def retry_with_name(
             result,
             extractor=extractor,
             calendar_lister=calendar_lister,
+        )
+
+    if result.reason in NAME_RETRY_REASONS:
+        # Réafficher le motif plutôt que de renvoyer au recadrage manuel sans
+        # explication (retour utilisateur : « ça me demande le recadrage ») ;
+        # le lien vers le recadrage reste sur cet écran.
+        return templates.TemplateResponse(
+            request,
+            "upload_name.html",
+            {
+                "user": user,
+                "upload_id": upload_id,
+                "reason": result.reason,
+                "matches": result.matches,
+                "tried": pdf_name,
+            },
         )
 
     return RedirectResponse(url=f"/upload/{upload_id}/manual", status_code=303)

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Literal
 
@@ -143,7 +144,13 @@ def _search_name(pages_words: list[list[dict]], candidate: str) -> list[_NameMat
         return []
     matches = []
     for page_index, words in enumerate(pages_words):
-        for line in _group_lines(words):
+        for raw_line in _group_lines(words):
+            # Un jeton fait uniquement de ponctuation (le « - » d'une case vide,
+            # juste après le nom) ne dit rien du nom, mais inclus dans une
+            # fenêtre il la faisait matcher une seconde fois (« Jean DUPONT » et
+            # « Jean DUPONT - » se normalisent pareil) : une seule personne
+            # passait pour un homonyme.
+            line = [w for w in raw_line if normalize(w["text"])]
             n = len(line)
             for length in (1, 2, 3):
                 for start in range(n - length + 1):
@@ -165,6 +172,72 @@ def find_name(
         if len(matches) > 1:
             return LocateFailure("nom_homonyme", tuple(m.text for m in matches))
     return LocateFailure("nom_introuvable")
+
+
+def _overlaps_vertically(a: dict, b: dict) -> bool:
+    return a["top"] < b["bottom"] and b["top"] < a["bottom"]
+
+
+def _union_bbox(a: dict, b: dict) -> dict:
+    return {
+        "x0": min(a["x0"], b["x0"]),
+        "x1": max(a["x1"], b["x1"]),
+        "top": min(a["top"], b["top"]),
+        "bottom": max(a["bottom"], b["bottom"]),
+    }
+
+
+@dataclass
+class _LineHits:
+    """Mots du nom tapé retrouvés sur une même ligne (voir `find_name_by_words`)."""
+
+    page_index: int
+    bbox: dict
+    matches: dict[str, _NameMatch]
+
+    def contains(self, match: _NameMatch) -> bool:
+        return self.page_index == match.page_index and _overlaps_vertically(self.bbox, match.bbox)
+
+    def text(self) -> str:
+        ordered = sorted(self.matches.values(), key=lambda m: m.bbox["x0"])
+        return " ".join(m.text for m in ordered)
+
+
+def find_name_by_words(
+    pages_words: list[list[dict]], words: Sequence[str]
+) -> tuple[_NameMatch, str] | LocateFailure:
+    """Repli quand aucun candidat complet ne matche : chaque mot est cherché
+    seul, et la ligne où le plus de mots se retrouvent gagne.
+
+    Retour utilisateur : sur son planning, « Jean DUPONT » ne matchait jamais
+    alors que « Jean » seul, oui. Si le nom de famille n'est pas lisible comme
+    texte pour pdfplumber (police sans table Unicode, texte vectorisé, lettres
+    espacées... impossible à savoir d'ici), seul un repli sur les mots lisibles
+    peut retrouver la ligne.
+
+    Garde-fou (risque n°1 : ne jamais choisir quelqu'un d'autre) : deux lignes
+    à égalité — « Jean » sur l'une, « DUPONT » sur l'autre — ne sont pas
+    départagées, on renvoie `nom_homonyme` avec les deux textes."""
+    if len(words) < 2:
+        return LocateFailure("nom_introuvable")
+    lines: list[_LineHits] = []
+    for word in dict.fromkeys(words):
+        for match in _search_name(pages_words, word):
+            for line in lines:
+                if line.contains(match):
+                    line.matches.setdefault(word, match)
+                    line.bbox = _union_bbox(line.bbox, match.bbox)
+                    break
+            else:
+                lines.append(_LineHits(match.page_index, match.bbox, {word: match}))
+    if not lines:
+        return LocateFailure("nom_introuvable")
+    best_score = max(len(line.matches) for line in lines)
+    best = [line for line in lines if len(line.matches) == best_score]
+    if len(best) > 1:
+        return LocateFailure("nom_homonyme", tuple(line.text() for line in best))
+    line = best[0]
+    return _NameMatch(line.page_index, line.bbox, line.text()), " ".join(words)
 
 
 def _long_edges(edges: list[dict], page_width: float) -> list[dict]:
@@ -307,11 +380,17 @@ def _is_scanned(pages_words: list[list[dict]]) -> bool:
     return all(len(words) == 0 for words in pages_words)
 
 
-def locate(pdf_path: str, candidates: list[str]) -> LocateResult | LocateFailure:
+def locate(
+    pdf_path: str, candidates: list[str], *, fallback_words: Sequence[str] = ()
+) -> LocateResult | LocateFailure:
     """Localise l'en-tête et la ligne de la personne dans le PDF.
 
-    `candidates` : voir `build_candidates`. Retourne un `LocateResult` (bornes
-    en points PDF, prêtes pour `crop.py`) ou un `LocateFailure` avec le motif.
+    `candidates` : voir `build_candidates`. `fallback_words` : les mots du nom
+    tapé par la personne, cherchés un par un si aucun candidat ne matche
+    (`find_name_by_words`) ; vide pour la détection automatique depuis le
+    compte Google, dont la cascade ne doit jamais chercher le prénom seul
+    (risque n°1). Retourne un `LocateResult` (bornes en points PDF, prêtes
+    pour `crop.py`) ou un `LocateFailure` avec le motif.
     """
     with pdfplumber.open(pdf_path) as pdf:
         pages_words = [page.extract_words() for page in pdf.pages]
@@ -320,6 +399,8 @@ def locate(pdf_path: str, candidates: list[str]) -> LocateResult | LocateFailure
             return LocateFailure("pdf_scanne")
 
         name_result = find_name(pages_words, candidates)
+        if isinstance(name_result, LocateFailure) and name_result.reason == "nom_introuvable":
+            name_result = find_name_by_words(pages_words, fallback_words)
         if isinstance(name_result, LocateFailure):
             return name_result
         name_match, candidate_used = name_result
