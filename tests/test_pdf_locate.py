@@ -64,6 +64,20 @@ def test_locate_finds_name_line_and_header(tmp_path):
     assert result.table_left < result.table_right
 
 
+def test_locate_exposes_name_horizontal_bounds(tmp_path):
+    """Position du nom dans la ligne (plan, section 10) : nécessaire pour le
+    griser avant l'envoi au modèle (crop.py::redact_name)."""
+    pdf_path = tmp_path / "planning.pdf"
+    _build_planning_pdf(pdf_path, names=NAMES)
+
+    result = locate(str(pdf_path), candidates=["BERNARD PAUL"])
+
+    assert isinstance(result, LocateResult)
+    assert result.name_x0 < result.name_x1
+    assert result.table_left <= result.name_x0
+    assert result.name_x1 <= result.table_right
+
+
 def test_locate_person_spanning_two_row_heights(tmp_path):
     pdf_path = tmp_path / "planning.pdf"
     _build_planning_pdf(pdf_path, names=NAMES, tall_row_index=2)

@@ -6,6 +6,7 @@ d'upload (voir description de la PR).
 
 from __future__ import annotations
 
+import io
 import json
 import logging
 import shutil
@@ -31,7 +32,7 @@ from app.calendar_sync import (
 from app.db import get_last_crop, get_pdf_name, set_last_crop, set_pdf_name
 from app.llm import ExtractError, RateLimitError, extract
 from app.log import log
-from app.pdf.crop import compose_crop, crop_manual
+from app.pdf.crop import compose_crop, crop_manual, redact_name
 from app.pdf.locate import LocateResult, build_candidates, locate
 from app.pdf.render import render_pages
 from app.settings import settings
@@ -181,7 +182,7 @@ def _build_preview(
     user: CurrentUser,
     upload_id: str,
     upload_dir: Path,
-    composed_path: Path,
+    model_image: bytes,
     *,
     matched_text: str | None,
     extractor: Callable[..., dict],
@@ -189,12 +190,18 @@ def _build_preview(
 ):
     """Appelle le modèle puis la validation locale (plan, sections 5C/5D).
 
+    `model_image` : jamais la même image que celle montrée en
+    prévisualisation (`/upload/{id}/image/composed.png`) sur la voie
+    automatique, où elle est grisée au niveau du nom avant l'appel (voir
+    `redact_name`) ; identique à celle montrée sur la voie manuelle, qui n'a
+    pas de position de nom connue.
+
     L'extraction brute est mise en cache dans le dossier d'upload : le
     bouton Valider (Phase 4) réutilise exactement ce qui a été montré ici,
     sans rappeler le modèle (ses réponses ne sont pas garanties identiques
     d'un appel à l'autre)."""
     try:
-        raw = extractor(composed_path.read_bytes())
+        raw = extractor(model_image)
         extraction = validate(raw, validation_weeks=settings.validation_weeks)
     except RateLimitError as exc:
         logger.exception("Quota du modele atteint")
@@ -250,12 +257,16 @@ def _result_response(
     composed = compose_crop(pages[result.page_index], result)
     composed_path = upload_dir / "composed.png"
     composed.save(composed_path)
+
+    buffer = io.BytesIO()
+    redact_name(composed, result).save(buffer, format="PNG")
+
     return _build_preview(
         request,
         user,
         upload_id,
         upload_dir,
-        composed_path,
+        buffer.getvalue(),
         matched_text=result.matched_text,
         extractor=extractor,
         calendar_lister=calendar_lister,
@@ -417,12 +428,15 @@ def manual_crop_submit(
     composed_path = upload_dir / "composed.png"
     cropped.save(composed_path)
 
+    buffer = io.BytesIO()
+    cropped.save(buffer, format="PNG")
+
     return _build_preview(
         request,
         user,
         upload_id,
         upload_dir,
-        composed_path,
+        buffer.getvalue(),
         matched_text=None,
         extractor=extractor,
         calendar_lister=calendar_lister,
