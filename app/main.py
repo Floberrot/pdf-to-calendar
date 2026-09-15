@@ -12,7 +12,8 @@ from fastapi.responses import RedirectResponse
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
-from app.auth import CurrentUser, RedirectToLogin, require_admin, require_user
+from app.admin import router as admin_router
+from app.auth import CurrentUser, RedirectToLogin, require_user
 from app.auth import router as auth_router
 from app.db import init_db, purge_old_imports
 from app.settings import settings
@@ -24,6 +25,7 @@ app = FastAPI(title="Planning → Agenda")
 app.add_middleware(SessionMiddleware, secret_key=settings.session_secret)
 app.include_router(auth_router)
 app.include_router(upload_router)
+app.include_router(admin_router)
 
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 
@@ -57,8 +59,3 @@ def health() -> dict[str, str]:
 @app.get("/")
 def index(request: Request, user: Annotated[CurrentUser, Depends(require_user)]):
     return templates.TemplateResponse(request, "index.html", {"user": user})
-
-
-@app.get("/admin")
-def admin_home(request: Request, user: Annotated[CurrentUser, Depends(require_admin)]):
-    return templates.TemplateResponse(request, "admin.html", {"user": user})

@@ -111,3 +111,16 @@ def set_last_crop(email: str, crop: dict) -> None:
             "UPDATE users SET last_crop = ? WHERE email = ?",
             (json.dumps(crop), email),
         )
+
+
+def list_recent_imports(*, email: str | None = None, limit: int = 200) -> list[sqlite3.Row]:
+    """Les dernières lignes du journal, plus récentes d'abord (plan, section 7)."""
+    query = "SELECT * FROM imports"
+    params: list[str | int] = []
+    if email:
+        query += " WHERE email = ?"
+        params.append(email)
+    query += " ORDER BY ts DESC LIMIT ?"
+    params.append(limit)
+    with transaction() as conn:
+        return conn.execute(query, params).fetchall()
