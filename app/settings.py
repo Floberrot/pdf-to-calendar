@@ -38,7 +38,7 @@ class Settings:
     calendar_id: str
     google_service_account_json: str
     llm_api_key: str
-    llm_model: str
+    llm_models: tuple[str, ...]  # du préféré au repli (LLM_MODEL, séparés par des virgules)
     tz: str
     validation_weeks: int
     data_dir: str
@@ -56,6 +56,10 @@ def load_settings(env: dict[str, str] | None = None) -> Settings:
     except ValueError as exc:
         raise RuntimeError("VALIDATION_WEEKS doit être un entier") from exc
 
+    llm_models = tuple(model.strip() for model in env["LLM_MODEL"].split(",") if model.strip())
+    if not llm_models:
+        raise RuntimeError("LLM_MODEL doit contenir au moins un modèle")
+
     return Settings(
         google_client_id=env["GOOGLE_CLIENT_ID"],
         google_client_secret=env["GOOGLE_CLIENT_SECRET"],
@@ -65,7 +69,7 @@ def load_settings(env: dict[str, str] | None = None) -> Settings:
         calendar_id=env["CALENDAR_ID"],
         google_service_account_json=env["GOOGLE_SERVICE_ACCOUNT_JSON"],
         llm_api_key=env["LLM_API_KEY"],
-        llm_model=env["LLM_MODEL"],
+        llm_models=llm_models,
         tz=env.get("TZ", "Europe/Paris"),
         validation_weeks=validation_weeks,
         data_dir=env.get("DATA_DIR", "./data"),

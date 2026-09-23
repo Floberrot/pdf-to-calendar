@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import io
 import json
+import logging
 import time
 from datetime import UTC, datetime
 from typing import Any, Protocol
@@ -19,6 +20,8 @@ from google.genai.errors import ServerError
 from PIL import Image
 
 from app.settings import settings
+
+logger = logging.getLogger("app")
 
 MAX_ATTEMPTS = 2
 RETRY_DELAY_SECONDS = 5
@@ -57,6 +60,15 @@ class RateLimitError(ExtractError):
     réessayer tout de suite, contrairement à un `ServerError` transitoire."""
 
 
+class _ModelUnavailable(Exception):
+    """Interne à ce module : ce modèle est saturé (quota ou 5xx persistant),
+    le suivant de la chaîne peut prendre le relais."""
+
+    def __init__(self, message: str, *, rate_limited: bool):
+        super().__init__(message)
+        self.rate_limited = rate_limited
+
+
 class _GenerateContent(Protocol):
     def generate_content(self, **kwargs: Any) -> Any: ...
 
@@ -77,18 +89,19 @@ def _is_rate_limit(message: str) -> bool:
     return message.startswith("429") or "RESOURCE_EXHAUSTED" in message
 
 
-def _call_model(contents: list[Any], *, client: _Client) -> dict:
-    """Appelle le modèle, renvoie le JSON de la réponse.
+def _call_one_model(model: str, contents: list[Any], *, client: _Client) -> dict:
+    """Appelle un modèle, renvoie le JSON de la réponse.
 
     Un `ServerError` (5xx, ex. « experiencing high demand ») déclenche un
     réessai : Google indique explicitement que ces pics sont temporaires.
     Le SDK réessaie déjà une fois en interne ; ça ne suffit pas toujours.
-    Un quota dépassé (429) ne réessaie jamais : ça n'aiderait pas.
+    Un 5xx persistant ou un quota dépassé (429) lèvent `_ModelUnavailable` :
+    inutile d'insister sur ce modèle, mais un autre peut répondre.
     """
     for attempt in range(1, MAX_ATTEMPTS + 1):
         try:
             response = client.models.generate_content(
-                model=settings.llm_model,
+                model=model,
                 contents=contents,
                 config=types.GenerateContentConfig(
                     temperature=0,
@@ -98,15 +111,48 @@ def _call_model(contents: list[Any], *, client: _Client) -> dict:
             return json.loads(response.text)
         except ServerError as exc:
             if attempt == MAX_ATTEMPTS:
-                raise ExtractError(f"Appel au modèle échoué : {_redact(str(exc))}") from exc
+                raise _ModelUnavailable(_redact(str(exc)), rate_limited=False) from exc
             time.sleep(RETRY_DELAY_SECONDS)
         except Exception as exc:
             message = _redact(str(exc))
             if _is_rate_limit(message):
-                raise RateLimitError(f"Quota du modèle atteint : {message}") from exc
+                raise _ModelUnavailable(message, rate_limited=True) from exc
             raise ExtractError(f"Appel au modèle échoué : {message}") from exc
 
     raise ExtractError("Appel au modèle échoué : aucune tentative effectuée")
+
+
+def _call_model(contents: list[Any], *, client: _Client) -> dict:
+    """Essaie chaque modèle de `settings.llm_models` dans l'ordre, passe au
+    suivant dès que l'un est saturé (quota 429, ou 5xx persistant).
+
+    Retour utilisateur : « le modèle plante car trop de demandes ». Les quotas
+    du tier gratuit sont comptés par modèle : quand le premier est à sec, le
+    suivant a encore les siens. Toute autre erreur (clé invalide, requête
+    refusée, JSON illisible) remonte tout de suite sans changer de modèle :
+    elle n'a rien à voir avec la charge et se reproduirait à l'identique.
+    """
+    failures: list[str] = []
+    only_rate_limits = True
+    for model in settings.llm_models:
+        try:
+            data = _call_one_model(model, contents, client=client)
+        except _ModelUnavailable as exc:
+            failures.append(f"{model} : {exc}")
+            only_rate_limits = only_rate_limits and exc.rate_limited
+            logger.warning("Modèle %s indisponible : %s", model, exc)
+            continue
+        if failures:
+            logger.info("Réponse obtenue du modèle de repli %s", model)
+        return data
+
+    detail = " ; ".join(failures)
+    several = len(failures) > 1
+    if only_rate_limits:
+        prefix = "Quota atteint sur tous les modèles" if several else "Quota du modèle atteint"
+        raise RateLimitError(f"{prefix} : {detail}")
+    prefix = "Appel échoué sur tous les modèles" if several else "Appel au modèle échoué"
+    raise ExtractError(f"{prefix} : {detail}")
 
 
 def extract(image_png: bytes, *, client: _Client | None = None) -> dict:

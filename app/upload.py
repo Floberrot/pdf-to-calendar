@@ -49,7 +49,8 @@ router = APIRouter(prefix="/upload", tags=["upload"])
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 # Fixe pour la vie du process (charge une fois au demarrage) : global Jinja
 # plutot que reinjecte dans le contexte de chaque TemplateResponse.
-templates.env.globals["llm_model"] = settings.llm_model
+templates.env.globals["llm_model"] = settings.llm_models[0]
+templates.env.globals["llm_fallback"] = len(settings.llm_models) > 1
 
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 MAX_PAGES = 10

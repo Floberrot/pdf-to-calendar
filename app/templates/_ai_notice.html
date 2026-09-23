@@ -1,1 +1,1 @@
-<p class="muted">Analysé par IA (modèle {{ llm_model }}) — seuls l'en-tête et ta ligne sont envoyés au modèle, ton nom est masqué avant l'envoi, jamais le reste du planning.</p>
+<p class="muted">Analysé par IA (modèle {{ llm_model }}{% if llm_fallback %}, ou un modèle de repli s'il est saturé{% endif %}) — seuls l'en-tête et ta ligne sont envoyés au modèle, ton nom est masqué avant l'envoi, jamais le reste du planning.</p>
