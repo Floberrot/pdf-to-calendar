@@ -5,6 +5,7 @@ Aucun appel réseau : le client Gemini est remplacé par un double.
 
 from __future__ import annotations
 
+import dataclasses
 import json
 
 import pytest
@@ -187,3 +188,97 @@ def test_health_check_raises_extract_error_on_provider_exception():
 
     with pytest.raises(ExtractError):
         health_check(client=_BrokenClient())
+
+
+PAYLOAD = {"periode": {"debut": "2026-09-14", "fin": "2026-09-20"}, "creneaux": []}
+
+
+def _with_models(monkeypatch, *models: str) -> None:
+    """Chaîne de modèles pour un test : `settings` est figé, on injecte une
+    copie modifiée dans le module llm."""
+    monkeypatch.setattr("app.llm.settings", dataclasses.replace(settings, llm_models=models))
+
+
+def _quota_error() -> RuntimeError:
+    return RuntimeError(
+        "429 RESOURCE_EXHAUSTED. {'error': {'code': 429, "
+        "'message': 'quota exceeded', 'status': 'RESOURCE_EXHAUSTED'}}"
+    )
+
+
+class _ChainClient:
+    """Faux client qui répond selon le modèle demandé : une exception à lever
+    ou un texte à renvoyer. Garde la trace des modèles appelés, dans l'ordre."""
+
+    def __init__(self, behaviours: dict[str, Exception | str]):
+        self.calls: list[str] = []
+        self._behaviours = behaviours
+        self.models = self
+
+    def generate_content(self, **kwargs):
+        model = kwargs["model"]
+        self.calls.append(model)
+        behaviour = self._behaviours[model]
+        if isinstance(behaviour, Exception):
+            raise behaviour
+        return _FakeResponse(behaviour)
+
+
+def test_extract_falls_back_to_next_model_on_quota_exhausted(monkeypatch):
+    """Retour utilisateur : « le modèle plante car trop de demandes ». Les
+    quotas du tier gratuit sont comptés par modèle : le suivant répond."""
+    _with_models(monkeypatch, "premier", "second")
+    client = _ChainClient({"premier": _quota_error(), "second": json.dumps(PAYLOAD)})
+
+    result = extract(b"fake-png-bytes", client=client)
+
+    assert result == PAYLOAD
+    assert client.calls == ["premier", "second"]
+
+
+def test_extract_falls_back_after_server_error_retries_exhausted(monkeypatch):
+    monkeypatch.setattr("app.llm.time.sleep", lambda seconds: None)
+    _with_models(monkeypatch, "premier", "second")
+    client = _ChainClient({"premier": _server_error(), "second": json.dumps(PAYLOAD)})
+
+    result = extract(b"fake-png-bytes", client=client)
+
+    assert result == PAYLOAD
+    assert client.calls == ["premier"] * MAX_ATTEMPTS + ["second"]
+
+
+def test_extract_raises_rate_limit_error_when_every_model_is_exhausted(monkeypatch):
+    _with_models(monkeypatch, "premier", "second")
+    client = _ChainClient({"premier": _quota_error(), "second": _quota_error()})
+
+    with pytest.raises(RateLimitError) as exc_info:
+        extract(b"fake-png-bytes", client=client)
+
+    assert client.calls == ["premier", "second"]
+    assert "premier" in str(exc_info.value)
+    assert "second" in str(exc_info.value)
+
+
+def test_extract_mixed_failures_raise_generic_extract_error(monkeypatch):
+    """Quota sur l'un, panne sur l'autre : ce n'est plus un simple « quota
+    atteint », le message d'erreur générique convient mieux à la personne."""
+    monkeypatch.setattr("app.llm.time.sleep", lambda seconds: None)
+    _with_models(monkeypatch, "premier", "second")
+    client = _ChainClient({"premier": _quota_error(), "second": _server_error()})
+
+    with pytest.raises(ExtractError) as exc_info:
+        extract(b"fake-png-bytes", client=client)
+
+    assert not isinstance(exc_info.value, RateLimitError)
+
+
+def test_extract_does_not_fall_back_on_non_capacity_errors(monkeypatch):
+    """Clé invalide, requête refusée... : ça se reproduirait à l'identique sur
+    le modèle suivant, autant échouer tout de suite et clairement."""
+    _with_models(monkeypatch, "premier", "second")
+    client = _ChainClient({"premier": RuntimeError("400 INVALID_ARGUMENT"), "second": "{}"})
+
+    with pytest.raises(ExtractError):
+        extract(b"fake-png-bytes", client=client)
+
+    assert client.calls == ["premier"]

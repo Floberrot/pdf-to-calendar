@@ -24,6 +24,19 @@ def test_load_settings_ok():
     assert settings.tz == "Europe/Paris"
     assert settings.validation_weeks == 8
     assert settings.data_dir == "./data"
+    assert settings.llm_models == ("model",)
+
+
+def test_load_settings_llm_model_accepts_a_comma_separated_chain():
+    """Plusieurs modèles, du préféré au repli (llm.py les essaie dans l'ordre)."""
+    env = dict(BASE_ENV, LLM_MODEL=" gemini-a, gemini-b ,gemini-c ")
+    settings = load_settings(env)
+    assert settings.llm_models == ("gemini-a", "gemini-b", "gemini-c")
+
+
+def test_load_settings_empty_llm_model_raises():
+    with pytest.raises(RuntimeError):
+        load_settings(dict(BASE_ENV, LLM_MODEL=" , "))
 
 
 def test_load_settings_missing_var_raises():
