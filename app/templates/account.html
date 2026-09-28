@@ -28,8 +28,14 @@
   <button type="submit">{% if search.source == "google" %}C'est bien moi, enregistrer{% else %}Enregistrer{% endif %}</button>
 </form>
 
-{% if saved %}
-<p class="success">Enregistré. <a href="/upload">Déposer ton planning</a></p>
+{% if submitted is not none %}
+{% if search.source == "profil" %}
+<p class="success">Enregistré : l'appli cherchera « {{ search.name }} » dans tes plannings. <a href="/upload">Déposer ton planning</a></p>
+{% elif submitted %}
+<p class="error">« {{ submitted }} » n'a pas pu être enregistré. Réessaie, et préviens l'admin si ça continue.</p>
+{% else %}
+<p class="success">Nom effacé : l'appli repart de ton compte Google.</p>
+{% endif %}
 {% endif %}
 
 <p class="muted">

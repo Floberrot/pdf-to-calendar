@@ -123,6 +123,32 @@ def test_account_saved_links_to_upload(client):
     assert "(enregistré)" in response.text
 
 
+def test_account_save_works_for_a_session_without_database_row(client):
+    """Retour utilisateur : « jamais reconnu même quand on save ». Session
+    valide sans ligne en base (redéploiement sur une base neuve) : le nom
+    doit quand même être enregistré, et la page le dire avec le bon nom."""
+    email = "ami-account-sans-ligne@example.com"
+    _override_user(email)
+
+    response = client.post("/account", data={"pdf_name": "MARTIN Sophie"})
+
+    assert get_pdf_name(email) == "MARTIN Sophie"
+    assert "Enregistré : l'appli cherchera « MARTIN Sophie »" in response.text
+    assert "(enregistré)" in response.text
+    assert "repris de ton compte" not in response.text
+
+
+def test_account_clearing_the_name_says_so(client):
+    email = "ami-account-effacement@example.com"
+    set_pdf_name(email, "DUPONT J.")
+    _override_user(email)
+
+    response = client.post("/account", data={"pdf_name": "  "})
+
+    assert get_pdf_name(email) is None
+    assert "Nom effacé" in response.text
+
+
 def test_search_name_prefers_saved_name_over_google():
     email = "ami-search-name@example.com"
     upsert_user_seen(email)
