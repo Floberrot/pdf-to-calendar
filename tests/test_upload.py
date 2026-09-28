@@ -12,7 +12,7 @@ from app import upload as upload_module
 from app.auth import CurrentUser, require_user
 from app.calendar_sync import ExistingEvent, SyncError, SyncResult
 from app.db import get_pdf_name, set_pdf_name, transaction, upsert_user_seen
-from app.llm import ExtractError, RateLimitError
+from app.llm import ExtractError, ModelUnavailableError, RateLimitError
 from app.main import app
 from app.upload import ERROR_MESSAGES, get_calendar_lister, get_calendar_syncer, get_extractor
 
@@ -389,6 +389,96 @@ def test_upload_pdf_rate_limit_shows_distinct_message(client, tmp_path):
 
     assert response.status_code == 200
     assert "Réessaie dans quelques minutes" in response.text
+
+
+def _upload_with_extractor(client, tmp_path, extractor):
+    _override_user(given_name="Sophie", family_name="MARTIN")
+    app.dependency_overrides[get_extractor] = lambda: extractor
+    pdf_path = tmp_path / "planning.pdf"
+    _build_planning_pdf(pdf_path)
+    with open(pdf_path, "rb") as f:
+        return client.post("/upload", files={"file": ("planning.pdf", f, "application/pdf")})
+
+
+def test_upload_models_unavailable_says_the_pdf_is_not_the_cause(client, tmp_path):
+    """Retour utilisateur : modèles saturés (503) ou retirés (404) chez Google.
+    Le message générique « n'a pas réussi à lire l'image » faisait croire à un
+    problème de PDF ou de nom, alors que la ligne avait bien été trouvée."""
+
+    def _unavailable_extractor(image_png: bytes) -> dict:
+        raise ModelUnavailableError("503 UNAVAILABLE sur tous les modèles (simulé)")
+
+    response = _upload_with_extractor(client, tmp_path, _unavailable_extractor)
+
+    assert response.status_code == 200
+    assert "saturés ou indisponibles pour" in response.text
+    assert "ton PDF et ton nom ne sont pas en cause" in response.text
+    assert "Réessaie ou recadre à la main" not in response.text
+    assert "Réessayer l'analyse" in response.text
+
+
+def test_retry_analysis_sends_the_same_image_again_without_a_new_upload(client, tmp_path):
+    images: list[bytes] = []
+
+    def _unavailable_extractor(image_png: bytes) -> dict:
+        images.append(image_png)
+        raise ModelUnavailableError("503 UNAVAILABLE (simulé)")
+
+    def _recovered_extractor(image_png: bytes) -> dict:
+        images.append(image_png)
+        return _fake_extraction_payload()
+
+    failed = _upload_with_extractor(client, tmp_path, _unavailable_extractor)
+    upload_id = _upload_id_from(failed.text, suffix="analyse")
+    app.dependency_overrides[get_extractor] = lambda: _recovered_extractor
+
+    response = client.post(f"/upload/{upload_id}/analyse")
+
+    assert response.status_code == 200
+    assert "09:00" in response.text
+    assert "MARTIN Sophie" in response.text
+    assert len(images) == 2
+    assert images[0] == images[1]
+
+
+def test_rate_limit_also_offers_to_retry_the_analysis(client, tmp_path):
+    def _rate_limited_extractor(image_png: bytes) -> dict:
+        raise RateLimitError("quota depasse simule")
+
+    response = _upload_with_extractor(client, tmp_path, _rate_limited_extractor)
+
+    assert "Réessayer l'analyse" in response.text
+
+
+def test_validation_failure_offers_no_retry(client, tmp_path):
+    """Une période hors fenêtre se reproduirait à l'identique sur la même
+    image : pas de bouton « Réessayer », le recadrage reste proposé."""
+
+    def _bad_periode_extractor(image_png: bytes) -> dict:
+        payload = _fake_extraction_payload()
+        payload["periode"] = {"debut": "2020-01-06", "fin": "2020-01-12"}
+        payload["creneaux"] = []
+        return payload
+
+    response = _upload_with_extractor(client, tmp_path, _bad_periode_extractor)
+
+    assert response.status_code == 200
+    assert "/analyse" not in response.text
+    assert "Recadrer à la main" in response.text
+
+
+def test_retry_analysis_without_a_previous_analysis_goes_to_manual_crop(client, tmp_path):
+    response = _upload_with_extractor(client, tmp_path, _default_extractor)
+    upload_id = _upload_id_from(response.text, suffix="manual")
+    upload_dir = next(
+        path for path in upload_module.BASE_UPLOAD_DIR.rglob(upload_id) if path.is_dir()
+    )
+    (upload_dir / upload_module.MODEL_IMAGE_NAME).unlink()
+
+    retried = client.post(f"/upload/{upload_id}/analyse", follow_redirects=False)
+
+    assert retried.status_code == 303
+    assert retried.headers["location"] == f"/upload/{upload_id}/manual"
 
 
 def test_upload_pdf_validation_failure_shows_error_message(client, tmp_path):

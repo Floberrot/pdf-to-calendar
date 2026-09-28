@@ -34,7 +34,7 @@ from app.calendar_sync import (
     sync_to_calendar,
 )
 from app.db import get_last_crop, get_pdf_name, set_last_crop, set_pdf_name
-from app.llm import ExtractError, RateLimitError, extract
+from app.llm import ExtractError, ModelUnavailableError, RateLimitError, extract
 from app.log import log
 from app.pdf.crop import compose_crop, crop_manual, redact_name
 from app.pdf.locate import LocateResult, build_candidates, locate, normalize
@@ -45,6 +45,12 @@ from app.validate import Creneau, ValidatedExtraction, ValidationError, validate
 logger = logging.getLogger("app")
 
 EXTRACTION_CACHE_NAME = "extraction.json"
+# Image envoyée au modèle et contexte de la prévisualisation, gardés pour
+# « Réessayer l'analyse » : relancer le modèle sans redéposer le PDF.
+MODEL_IMAGE_NAME = "model.png"
+PREVIEW_CONTEXT_NAME = "preview.json"
+# Échecs du modèle qu'un nouvel essai sur la même image peut résoudre.
+RETRYABLE_REASONS = {"modele_indisponible", "limite_atteinte", "extraction_echouee"}
 
 router = APIRouter(prefix="/upload", tags=["upload"])
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
@@ -68,6 +74,10 @@ NAME_RETRY_REASONS = {"nom_introuvable", "nom_homonyme"}
 ERROR_MESSAGES = {
     "extraction_echouee": (
         "Le modèle n'a pas réussi à lire l'image. Réessaie ou recadre à la main."
+    ),
+    "modele_indisponible": (
+        "Les modèles d'IA de Google sont saturés ou indisponibles pour l'instant : "
+        "ton PDF et ton nom ne sont pas en cause. Réessaie dans quelques minutes."
     ),
     "limite_atteinte": (
         "Le quota gratuit du modèle est atteint pour l'instant. Réessaie dans "
@@ -252,10 +262,12 @@ def _render_preview(
     sync_error: str | None = None,
     wanted_text: str | None = None,
     profile_saved: str | None = None,
+    retry_analysis: bool = False,
 ):
     """`wanted_text` : le nom cherché, quand seule une partie a été retrouvée
     (`_is_partial_match`) ; `profile_saved` : le nom tout juste enregistré au
-    profil après un « changer le nom » réussi."""
+    profil après un « changer le nom » réussi ; `retry_analysis` : proposer
+    de relancer le modèle sur la même image (`RETRYABLE_REASONS`)."""
     return templates.TemplateResponse(
         request,
         "upload_result.html",
@@ -269,6 +281,7 @@ def _render_preview(
             "sync_error": sync_error,
             "wanted_text": wanted_text,
             "profile_saved": profile_saved,
+            "retry_analysis": retry_analysis,
         },
     )
 
@@ -307,7 +320,14 @@ def _build_preview(
     L'extraction brute est mise en cache dans le dossier d'upload : le
     bouton Valider (Phase 4) réutilise exactement ce qui a été montré ici,
     sans rappeler le modèle (ses réponses ne sont pas garanties identiques
-    d'un appel à l'autre)."""
+    d'un appel à l'autre).
+
+    L'image et le contexte sont aussi gardés pour « Réessayer l'analyse »
+    (`retry_analysis`)."""
+    (upload_dir / MODEL_IMAGE_NAME).write_bytes(model_image)
+    (upload_dir / PREVIEW_CONTEXT_NAME).write_text(
+        json.dumps({"matched_text": matched_text, "wanted_text": wanted_text}), encoding="utf-8"
+    )
     try:
         raw = extractor(model_image)
         extraction = validate(raw, validation_weeks=settings.validation_weeks)
@@ -315,6 +335,10 @@ def _build_preview(
         logger.exception("Quota du modele atteint")
         _log_llm_failure(request, user, str(exc))
         extraction = ValidationError("limite_atteinte")
+    except ModelUnavailableError as exc:
+        logger.exception("Modeles satures ou introuvables")
+        _log_llm_failure(request, user, str(exc))
+        extraction = ValidationError("modele_indisponible")
     except ExtractError as exc:
         logger.exception("Extraction du modele en echec")
         _log_llm_failure(request, user, str(exc))
@@ -331,6 +355,7 @@ def _build_preview(
             existing_events=None,
             wanted_text=wanted_text,
             profile_saved=profile_saved,
+            retry_analysis=extraction.reason in RETRYABLE_REASONS,
         )
 
     (upload_dir / EXTRACTION_CACHE_NAME).write_text(json.dumps(raw), encoding="utf-8")
@@ -573,6 +598,36 @@ def manual_crop_submit(
         upload_dir,
         buffer.getvalue(),
         matched_text=None,
+        extractor=extractor,
+        calendar_lister=calendar_lister,
+    )
+
+
+@router.post("/{upload_id}/analyse")
+def reanalyse(
+    request: Request,
+    user: Annotated[CurrentUser, Depends(require_user)],
+    upload_id: str,
+    extractor: Annotated[Callable[..., dict], Depends(get_extractor)],
+    calendar_lister: Annotated[Callable[..., list[ExistingEvent]], Depends(get_calendar_lister)],
+):
+    """Relance le modèle sur l'image déjà envoyée, sans redéposer le PDF ni
+    rechercher la ligne : un modèle saturé (503) répond souvent quelques
+    minutes plus tard."""
+    upload_dir = _upload_dir(request, upload_id)
+    image_path = upload_dir / MODEL_IMAGE_NAME
+    if not image_path.exists():
+        return RedirectResponse(url=f"/upload/{upload_id}/manual", status_code=303)
+    context_path = upload_dir / PREVIEW_CONTEXT_NAME
+    context = json.loads(context_path.read_text(encoding="utf-8")) if context_path.exists() else {}
+    return _build_preview(
+        request,
+        user,
+        upload_id,
+        upload_dir,
+        image_path.read_bytes(),
+        matched_text=context.get("matched_text"),
+        wanted_text=context.get("wanted_text"),
         extractor=extractor,
         calendar_lister=calendar_lister,
     )

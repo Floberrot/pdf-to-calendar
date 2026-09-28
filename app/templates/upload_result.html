@@ -14,6 +14,11 @@
 
 {% if error_message %}
 <p class="error">{{ error_message }}</p>
+{% if retry_analysis %}
+<form action="/upload/{{ upload_id }}/analyse" method="post" data-loading="{{ loading_message }}">
+  <button type="submit">Réessayer l'analyse</button>
+</form>
+{% endif %}
 {% elif extraction %}
 <h2>
   Créneaux détectés du {{ extraction.periode_debut.strftime("%d/%m/%Y") }}
