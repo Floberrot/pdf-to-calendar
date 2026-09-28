@@ -70,7 +70,7 @@
 
 {% if sync_error %}<p class="error">{{ sync_error }}</p>{% endif %}
 <div class="actions">
-  <form action="/upload/{{ upload_id }}/confirm" method="post">
+  <form action="/upload/{{ upload_id }}/confirm" method="post" data-loading="Écriture dans ton agenda…">
     <button type="submit">Valider</button>
   </form>
 </div>

@@ -16,7 +16,7 @@
   <img id="crop-image" src="/upload/{{ upload_id }}/image/page_{{ page_number }}.png">
 </div>
 
-<form id="crop-form" action="/upload/{{ upload_id }}/manual" method="post">
+<form id="crop-form" action="/upload/{{ upload_id }}/manual" method="post" data-loading="{{ loading_message }}">
   <input type="hidden" name="page" value="{{ page_number }}">
   <input type="hidden" name="x" id="crop-x">
   <input type="hidden" name="y" id="crop-y">
