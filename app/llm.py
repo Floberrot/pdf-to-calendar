@@ -29,27 +29,40 @@ RETRY_DELAY_SECONDS = 5
 
 _HEALTH_CHECK_PROMPT = 'Réponds uniquement avec cet objet JSON, sans rien ajouter : {"ok": true}'
 
-_PROMPT_TEMPLATE = """Tu lis un planning de travail dans cette image : une bande \
-d'en-tête avec les dates de la semaine, empilée au-dessus de la ligne d'une \
-seule personne.
+_PROMPT_TEMPLATE = """Tu lis un planning de travail dans cette image, découpée \
+autour d'une seule personne. Elle contient un ou plusieurs blocs empilés de \
+haut en bas (un par tableau, par exemple une semaine chacun), de l'une de ces \
+deux formes :
+- une bande d'en-tête avec les dates, au-dessus de la ligne de la personne ;
+- une colonne de dates à gauche, à côté de la colonne de la personne.
+La zone noire masque son nom : ignore-la.
 
 Date d'aujourd'hui : {today}.
 
+Les dates peuvent être écrites de bien des façons (« Lun 14 », « 14/09 », \
+« 14.09.26 », « 2026-09-14 », « lundi 14 septembre », « L 14 », « Mon 14 », \
+numéro seul…). Sans mois ni année visibles, prends ceux qui placent ces jours \
+au plus près d'aujourd'hui, en respectant les jours de la semaine s'ils sont \
+écrits.
+
 Renvoie uniquement un objet JSON avec :
-- "periode" : {{"debut": "AAAA-MM-JJ", "fin": "AAAA-MM-JJ"}}, la plage de dates \
-couverte par l'en-tête (pas la plage des créneaux : un jour de repos en fin de \
-semaine doit être inclus).
+- "periode" : {{"debut": "AAAA-MM-JJ", "fin": "AAAA-MM-JJ"}}, de la première à \
+la dernière date de l'ensemble des en-têtes (pas la plage des créneaux : un \
+jour de repos en fin de semaine doit être inclus).
 - "creneaux" : liste d'objets {{"date": "AAAA-MM-JJ", "debut": "HH:MM", \
-"fin": "HH:MM", "lieu": "..."}}, un par créneau de travail sur la ligne. \
-"lieu" est une chaîne vide si rien n'est indiqué. Un jour sans créneau \
-n'apparaît pas dans la liste. Une même journée peut avoir plusieurs créneaux \
-(coupure). Si un créneau se termine après minuit, indique l'heure de fin \
-telle qu'écrite sur le planning (ex. 21:00 à 07:00), sans changer la date.
+"fin": "HH:MM", "lieu": "..."}}, un par créneau de travail de la personne. \
+Convertis toujours les heures en HH:MM (« 9h » → "09:00", « 8h30 » → \
+"08:30"). "lieu" est une chaîne vide si rien n'est indiqué. Un jour sans \
+créneau n'apparaît pas dans la liste. Une même journée peut avoir plusieurs \
+créneaux (coupure, ex. « 7h-12h 13h-16h » ou deux lignes dans la case). Si un \
+créneau se termine après minuit, indique l'heure de fin telle qu'écrite sur le \
+planning (ex. 21:00 à 07:00), sans changer la date.
 - "jours_incertains" : liste d'objets {{"date": "AAAA-MM-JJ", "texte": "..."}}, \
-un par jour où la case n'est ni vide, ni un horaire clair (HH:MM-HH:MM), ni une \
-mention habituelle de repos ou d'absence (congé, RTT, repos, récupération, \
-arrêt maladie...). "texte" reprend ce qui est écrit dans la case, tel quel, \
-sans l'interpréter. Ces jours n'apparaissent jamais dans "creneaux"."""
+un par jour où la case n'est ni vide, ni un horaire clair, ni une mention \
+habituelle de repos ou d'absence (congé, RTT, repos, récupération, arrêt \
+maladie...) — par exemple un code de poste (« M », « S », « N ») sans légende \
+visible qui donne ses horaires. "texte" reprend ce qui est écrit dans la case, \
+tel quel, sans l'interpréter. Ces jours n'apparaissent jamais dans "creneaux"."""
 
 
 class ExtractError(Exception):
