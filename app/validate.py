@@ -6,6 +6,7 @@ une lecture globale, pour rester testable sans configuration.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from typing import Literal
@@ -56,6 +57,36 @@ class ValidationError:
     reason: ValidationReason
 
 
+_HEURE = re.compile(r"(\d{1,2})\s*(?:[h:.]\s*(\d{2})?)?")
+_DATE_FR = re.compile(r"(\d{1,2})/(\d{1,2})/(\d{4})")
+
+
+def _normalize_heure(value: object) -> str:
+    """« 9h », « 9h30 », « 09:00 », « 9.30 », « 9 » → « HH:MM ». Le prompt
+    demande déjà HH:MM, mais le modèle recopie parfois l'horaire tel qu'écrit
+    sur le planning : inutile de rejeter tout le planning pour ça. « 24:00 »
+    (fin de journée) devient « 00:00 », le lendemain (voir la durée)."""
+    match = _HEURE.fullmatch(str(value).strip().lower())
+    if not match:
+        raise ValueError(f"heure invalide : {value!r}")
+    hours, minutes = int(match.group(1)), int(match.group(2) or 0)
+    if hours == 24 and minutes == 0:
+        hours = 0
+    if hours > 23 or minutes > 59:
+        raise ValueError(f"heure invalide : {value!r}")
+    return f"{hours:02d}:{minutes:02d}"
+
+
+def _parse_date(value: object) -> date:
+    """AAAA-MM-JJ (demandé au modèle), avec une heure éventuelle derrière, ou
+    JJ/MM/AAAA."""
+    text = str(value).strip()
+    match = _DATE_FR.fullmatch(text)
+    if match:
+        return date(int(match.group(3)), int(match.group(2)), int(match.group(1)))
+    return date.fromisoformat(text[:10])
+
+
 def _creneau_duration_hours(debut: str, fin: str) -> float:
     """Durée en heures ; si fin <= début, le créneau se termine le lendemain
     (ex. 21:00-07:00 = 10h)."""
@@ -72,8 +103,8 @@ def validate(
     today = today or datetime.now(UTC).date()
 
     try:
-        periode_debut = date.fromisoformat(raw["periode"]["debut"])
-        periode_fin = date.fromisoformat(raw["periode"]["fin"])
+        periode_debut = _parse_date(raw["periode"]["debut"])
+        periode_fin = _parse_date(raw["periode"]["fin"])
     except (KeyError, ValueError, TypeError):
         return ValidationError("periode_invalide")
 
@@ -83,17 +114,21 @@ def validate(
     if (periode_fin - periode_debut).days > MAX_PERIODE_WEEKS * 7:
         return ValidationError("periode_trop_longue")
 
+    # La fenêtre attrape une année ou un mois mal lus (période sans aucun
+    # rapport avec aujourd'hui). Il suffit que la période la recoupe : un
+    # planning du mois entier, déposé en fin de mois, commence plus de deux
+    # semaines avant aujourd'hui sans être faux pour autant.
     window_start = today - timedelta(weeks=2)
     window_end = today + timedelta(weeks=validation_weeks)
-    if periode_debut < window_start or periode_fin > window_end:
+    if periode_fin < window_start or periode_debut > window_end:
         return ValidationError("periode_hors_fenetre")
 
     creneaux: list[Creneau] = []
     for raw_creneau in raw.get("creneaux") or []:
         try:
-            creneau_date = date.fromisoformat(raw_creneau["date"])
-            debut = raw_creneau["debut"]
-            fin = raw_creneau["fin"]
+            creneau_date = _parse_date(raw_creneau["date"])
+            debut = _normalize_heure(raw_creneau["debut"])
+            fin = _normalize_heure(raw_creneau["fin"])
         except (KeyError, ValueError, TypeError):
             return ValidationError("creneau_invalide")
 
@@ -125,7 +160,7 @@ def validate(
     jours_incertains: list[JourIncertain] = []
     for raw_jour in raw.get("jours_incertains") or []:
         try:
-            jour_date = date.fromisoformat(raw_jour["date"])
+            jour_date = _parse_date(raw_jour["date"])
         except (KeyError, ValueError, TypeError):
             continue
         if periode_debut <= jour_date <= periode_fin and jour_date not in creneau_dates:
