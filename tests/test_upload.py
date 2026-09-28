@@ -10,7 +10,7 @@ from reportlab.pdfgen import canvas
 
 from app.auth import CurrentUser, require_user
 from app.calendar_sync import ExistingEvent, SyncError, SyncResult
-from app.db import transaction
+from app.db import get_pdf_name, set_pdf_name, transaction, upsert_user_seen
 from app.llm import ExtractError, RateLimitError
 from app.main import app
 from app.upload import ERROR_MESSAGES, get_calendar_lister, get_calendar_syncer, get_extractor
@@ -653,3 +653,111 @@ def test_confirm_sync_failure_is_logged(client, tmp_path):
         ).fetchone()
     assert row is not None
     assert "panne agenda bien precise" in row["detail"]
+
+
+def _override_known_user(email: str, *, given_name: str, family_name: str) -> None:
+    """Utilisateur avec une ligne en base (comme après une vraie connexion) :
+    sans elle, `set_pdf_name` ne met rien à jour et le profil reste vide."""
+    upsert_user_seen(email)
+    _override_user(given_name=given_name, family_name=family_name)
+    app.dependency_overrides[require_user] = lambda: CurrentUser(
+        email=email,
+        name="Ami",
+        is_admin=False,
+        given_name=given_name,
+        family_name=family_name,
+    )
+
+
+def _upload(client, pdf_path):
+    with open(pdf_path, "rb") as f:
+        return client.post("/upload", files={"file": ("planning.pdf", f, "application/pdf")})
+
+
+def test_upload_form_shows_the_searched_name(client):
+    """Demande utilisateur : le nom cherché, mis en avant là où on dépose."""
+    _override_user(given_name="Sophie", family_name="MARTIN")
+
+    response = client.get("/upload")
+
+    assert "Sophie MARTIN" in response.text
+    assert "repris de ton compte Google" in response.text
+
+
+def test_name_not_found_says_what_was_searched_and_asks_for_first_name(client, tmp_path):
+    """Demande utilisateur : on teste avec le nom Google, et si ça ne marche
+    pas on demande le prénom."""
+    _override_user(given_name="Inconnue", family_name="PERSONNE")
+    pdf_path = tmp_path / "planning.pdf"
+    _build_planning_pdf(pdf_path)
+
+    response = _upload(client, pdf_path)
+
+    assert "On a cherché « Inconnue PERSONNE » (ton compte Google)" in response.text
+    assert "ton prénom seul suffit" in response.text
+    assert 'placeholder="ex. Inconnue' in response.text
+
+
+def test_retry_success_saves_the_typed_name_to_the_profile_and_says_so(client, tmp_path):
+    email = "ami-upload-profil@example.com"
+    _override_known_user(email, given_name="Inconnue", family_name="PERSONNE")
+    pdf_path = tmp_path / "planning.pdf"
+    _build_planning_pdf(pdf_path)
+    upload_id = _upload_id_from(_upload(client, pdf_path).text, suffix="name")
+
+    response = client.post(f"/upload/{upload_id}/name", data={"pdf_name": "MARTIN Sophie"})
+
+    assert get_pdf_name(email) == "MARTIN Sophie"
+    assert "« MARTIN Sophie » est enregistré dans" in response.text
+
+
+def test_partial_name_match_warns_before_validation(client, tmp_path):
+    """Repli mot par mot : seul « Sophie » est trouvé pour « Sophie INCONNUE ».
+    Ça peut être la bonne ligne (nom de famille illisible)… ou un homonyme de
+    prénom si la personne n'est pas sur ce planning : à faire vérifier."""
+    _override_user(given_name="Inconnue", family_name="PERSONNE")
+    pdf_path = tmp_path / "planning.pdf"
+    _build_planning_pdf(pdf_path)
+    upload_id = _upload_id_from(_upload(client, pdf_path).text, suffix="name")
+
+    response = client.post(f"/upload/{upload_id}/name", data={"pdf_name": "Sophie INCONNUE"})
+
+    assert "Seul « Sophie » a été trouvé" in response.text
+    assert "vérifie sur l'image" in response.text
+
+
+def test_exact_name_match_shows_no_partial_warning(client, tmp_path):
+    _override_user(given_name="Sophie", family_name="MARTIN")
+    pdf_path = tmp_path / "planning.pdf"
+    _build_planning_pdf(pdf_path)
+
+    response = _upload(client, pdf_path)
+
+    assert "MARTIN Sophie" in response.text
+    assert "a été trouvé sur le planning, pas" not in response.text
+
+
+def test_upload_never_rewrites_a_name_already_saved(client, tmp_path):
+    """Nom enregistré « Sophie MARTIN », planning « MARTIN Sophie » : trouvé
+    via l'ordre inverse, mais le profil garde ce que la personne a tapé."""
+    email = "ami-upload-garde-nom@example.com"
+    _override_known_user(email, given_name="Sophie", family_name="MARTIN")
+    set_pdf_name(email, "Sophie MARTIN")
+    pdf_path = tmp_path / "planning.pdf"
+    _build_planning_pdf(pdf_path)
+
+    response = _upload(client, pdf_path)
+
+    assert "MARTIN Sophie" in response.text
+    assert get_pdf_name(email) == "Sophie MARTIN"
+
+
+def test_first_success_from_google_name_fills_the_profile(client, tmp_path):
+    email = "ami-upload-premier-succes@example.com"
+    _override_known_user(email, given_name="Sophie", family_name="MARTIN")
+    pdf_path = tmp_path / "planning.pdf"
+    _build_planning_pdf(pdf_path)
+
+    _upload(client, pdf_path)
+
+    assert get_pdf_name(email) == "MARTIN Sophie"

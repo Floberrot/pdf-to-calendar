@@ -2,5 +2,6 @@
 {% block title %}Accueil{% endblock %}
 {% block content %}
 <h1>Bonjour {{ user.name }}</h1>
+{% include "_search_name.html" %}
 <p><a class="button" href="/upload">Déposer ton planning</a></p>
 {% endblock %}

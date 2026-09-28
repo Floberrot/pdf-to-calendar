@@ -29,3 +29,21 @@ def test_index_ok_for_authenticated_user():
         assert response.status_code == 200
     finally:
         app.dependency_overrides.clear()
+
+
+def test_index_shows_searched_name_and_profile_link():
+    """Demande utilisateur : le nom cherché dans les plannings mis en avant."""
+    app.dependency_overrides[require_user] = lambda: CurrentUser(
+        email="ami-accueil@example.com",
+        name="Ami",
+        is_admin=False,
+        given_name="Jean",
+        family_name="DUPONT",
+    )
+    try:
+        response = client.get("/")
+        assert "Jean DUPONT" in response.text
+        assert "repris de ton compte Google" in response.text
+        assert 'href="/account"' in response.text
+    finally:
+        app.dependency_overrides.clear()

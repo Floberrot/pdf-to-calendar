@@ -1,33 +1,46 @@
 {% extends "base.html" %}
 {% block title %}Ton profil{% endblock %}
 {% block content %}
-<h1>Nom recherché dans le planning</h1>
+<h1>Ton nom dans les plannings</h1>
+{% if welcome %}
+<p class="success">
+  Bienvenue ! Vérifie le nom sous lequel tu apparais sur tes plannings : l'appli
+  le cherchera dans chaque PDF déposé, tu n'auras pas à le retaper.
+  {% if prefill %}On l'a pré-rempli depuis ton compte Google.{% endif %}
+</p>
+{% endif %}
 <p>
-  Quand tu déposes un PDF, l'appli cherche ta ligne à partir de ce nom.
-  {% if pdf_name %}
-  En ce moment : <strong>{{ pdf_name }}</strong>.
+  {% if search.source == "profil" %}
+  Nom cherché en ce moment : <strong>{{ search.name }}</strong> (enregistré).
+  {% elif search.source == "google" %}
+  Nom cherché en ce moment : <strong>{{ search.name }}</strong>, repris de ton compte
+  Google — pas encore confirmé.
   {% else %}
-  Rien d'enregistré pour l'instant : elle essaie automatiquement à partir de
-  ton prénom et nom Google ({{ user.given_name or "?" }} {{ user.family_name or "?" }}).
+  Aucun nom pour l'instant : ton compte Google ne donne pas de nom de famille,
+  l'appli ne sait pas quel nom chercher.
   {% endif %}
 </p>
-<p class="muted">
-  Casse, accents et ponctuation n'ont pas d'importance. Si tu tapes ton nom
-  et ton prénom (deux mots), les deux ordres sont essayés automatiquement —
-  « DUPONT Jean » fonctionne même si le planning écrit « Jean DUPONT », et
-  inversement. Si l'un des deux mots n'est pas lisible dans le PDF (ça arrive
-  avec certaines polices), l'appli se rabat sur l'autre, à condition qu'il ne
-  désigne qu'une seule ligne. Si seul ton prénom apparaît sur le planning,
-  tape seulement ton prénom.
-</p>
-
-{% if saved %}<p class="success">Enregistré.</p>{% endif %}
 
 <form action="/account" method="post">
   <div class="field">
-    <input type="text" name="pdf_name" value="{{ pdf_name or '' }}" placeholder="ex. DUPONT J.">
+    <input type="text" name="pdf_name" value="{{ prefill }}" placeholder="ex. DUPONT J." aria-label="Nom tel qu'il est écrit sur tes plannings">
   </div>
-  <button type="submit">Enregistrer</button>
+  <button type="submit">{% if search.source == "google" %}C'est bien moi, enregistrer{% else %}Enregistrer{% endif %}</button>
 </form>
-<p class="muted">Laisse le champ vide et enregistre pour revenir à la détection automatique.</p>
+
+{% if saved %}
+<p class="success">Enregistré. <a href="/upload">Déposer ton planning</a></p>
+{% endif %}
+
+<p class="muted">
+  Tape-le comme il est écrit sur le planning. Casse, accents et ponctuation
+  n'ont pas d'importance, et pour un nom et un prénom (deux mots) les deux
+  ordres sont essayés — « DUPONT Jean » fonctionne même si le planning écrit
+  « Jean DUPONT ». Si l'un des deux mots n'est pas lisible dans le PDF (ça
+  arrive avec certaines polices), l'appli se rabat sur l'autre, à condition
+  qu'il ne désigne qu'une seule ligne. Si ton planning n'affiche que les
+  prénoms, tape seulement ton prénom.
+</p>
+<p class="muted">Laisse le champ vide et enregistre pour revenir à la détection automatique depuis ton compte Google.</p>
+{% if welcome %}<p class="page-links"><a href="/upload">Plus tard</a></p>{% endif %}
 {% endblock %}

@@ -11,8 +11,9 @@ dépôt raté.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.templating import Jinja2Templates
@@ -24,17 +25,52 @@ router = APIRouter(prefix="/account", tags=["account"])
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 
 
-def _render(request: Request, user: CurrentUser, *, saved: bool = False):
+@dataclass(frozen=True)
+class SearchName:
+    """Nom sous lequel l'appli cherche la ligne de la personne, et d'où il
+    vient : rappelé sur l'accueil, le dépôt et l'écran de reprise, pour que
+    chacun sache quoi corriger quand sa ligne n'est pas trouvée."""
+
+    name: str | None
+    source: Literal["profil", "google", "aucun"]
+
+
+def search_name_for(user: CurrentUser) -> SearchName:
+    """Le nom enregistré au profil, sinon celui du compte Google — tel que
+    `build_candidates` le cherche (sans nom de famille, aucun candidat)."""
+    saved = get_pdf_name(user.email)
+    if saved:
+        return SearchName(saved, "profil")
+    if user.family_name.strip():
+        return SearchName(f"{user.given_name} {user.family_name}".strip(), "google")
+    return SearchName(None, "aucun")
+
+
+def _google_name(user: CurrentUser) -> str:
+    return f"{user.given_name} {user.family_name}".strip()
+
+
+def _render(request: Request, user: CurrentUser, *, saved: bool = False, welcome: bool = False):
+    saved_name = get_pdf_name(user.email)
     return templates.TemplateResponse(
         request,
         "account.html",
-        {"user": user, "pdf_name": get_pdf_name(user.email), "saved": saved},
+        {
+            "user": user,
+            "search": search_name_for(user),
+            "prefill": saved_name or _google_name(user),
+            "saved": saved,
+            "welcome": welcome,
+        },
     )
 
 
 @router.get("")
 def account_form(request: Request, user: Annotated[CurrentUser, Depends(require_user)]):
-    return _render(request, user)
+    """`?bienvenue=1` : arrivée depuis la connexion tant qu'aucun nom n'est
+    enregistré (`auth.after_login_url`), avec le nom Google pré-rempli à
+    confirmer d'un clic."""
+    return _render(request, user, welcome=request.query_params.get("bienvenue") == "1")
 
 
 @router.post("")
