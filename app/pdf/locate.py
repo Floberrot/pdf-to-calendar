@@ -23,6 +23,7 @@ import statistics
 import unicodedata
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
+from itertools import pairwise
 from typing import Literal, Protocol
 
 import pdfplumber
@@ -359,10 +360,10 @@ def _split_runs(
 ) -> list[_Run]:
     if len(anchors) < MinAlignedDates:
         return []
-    gaps = [position(b) - position(a) for a, b in zip(anchors, anchors[1:], strict=False)]
+    gaps = [position(b) - position(a) for a, b in pairwise(anchors)]
     limit = MaxRunGapRatio * statistics.median(gaps)
     runs = [[anchors[0]]]
-    for a, b, gap in zip(anchors, anchors[1:], gaps, strict=False):
+    for (a, b), gap in zip(pairwise(anchors), gaps, strict=True):
         if _valid_step(a.day, b.day) and gap <= limit and not interrupted(a, b):
             runs[-1].append(b)
         else:
