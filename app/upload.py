@@ -23,6 +23,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Uplo
 from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
+from app.account import search_name_for
 from app.auth import CurrentUser, require_user
 from app.calendar_sync import (
     ExistingEvent,
@@ -36,7 +37,7 @@ from app.db import get_last_crop, get_pdf_name, set_last_crop, set_pdf_name
 from app.llm import ExtractError, RateLimitError, extract
 from app.log import log
 from app.pdf.crop import compose_crop, crop_manual, redact_name
-from app.pdf.locate import LocateResult, build_candidates, locate
+from app.pdf.locate import LocateResult, build_candidates, locate, normalize
 from app.pdf.render import render_pages
 from app.settings import settings
 from app.validate import Creneau, ValidatedExtraction, ValidationError, validate
@@ -130,9 +131,17 @@ def _page_paths(upload_dir: Path) -> list[Path]:
     return sorted((upload_dir / "pages").glob("page_*.png"), key=lambda p: p.name)
 
 
+def _upload_page(request: Request, user: CurrentUser, error: str | None = None):
+    return templates.TemplateResponse(
+        request,
+        "upload.html",
+        {"user": user, "error": error, "search": search_name_for(user)},
+    )
+
+
 @router.get("")
 def upload_form(request: Request, user: Annotated[CurrentUser, Depends(require_user)]):
-    return templates.TemplateResponse(request, "upload.html", {"user": user, "error": None})
+    return _upload_page(request, user)
 
 
 def _run_locate(user: CurrentUser, pdf_path: Path, pdf_name_override: str | None = None):
@@ -143,11 +152,24 @@ def _run_locate(user: CurrentUser, pdf_path: Path, pdf_name_override: str | None
     return locate(str(pdf_path), candidates, fallback_words=pdf_name.split() if pdf_name else ())
 
 
-def _save_pdf_name_if_new(
-    user: CurrentUser, candidate_used: str, pdf_name_override: str | None
-) -> None:
-    if pdf_name_override is not None and get_pdf_name(user.email) != candidate_used:
-        set_pdf_name(user.email, candidate_used)
+def _save_pdf_name_if_new(user: CurrentUser, candidate_used: str) -> str | None:
+    """Enregistre au profil le nom tapé qui a permis de trouver la ligne ;
+    renvoie ce nom s'il vient d'être enregistré (pour le dire à la personne)."""
+    if get_pdf_name(user.email) == candidate_used:
+        return None
+    set_pdf_name(user.email, candidate_used)
+    return candidate_used
+
+
+def _is_partial_match(result: LocateResult) -> bool:
+    """Repli mot par mot (`locate.find_name_by_words`) : seule une partie du
+    nom cherché a été retrouvée, ex. « Jean » pour « Jean DUPONT ». Pas faux en
+    soi (nom de famille illisible dans le PDF), mais c'est aussi ce qui se
+    passerait si la personne n'était pas sur ce planning et qu'un homonyme de
+    prénom l'était : à faire vérifier avant de valider."""
+    found = set(normalize(result.matched_text).split())
+    wanted = set(normalize(result.candidate_used).split())
+    return found < wanted
 
 
 @dataclass(frozen=True)
@@ -228,7 +250,12 @@ def _render_preview(
     error_message: str | None,
     existing_events: list[ExistingEventView] | None,
     sync_error: str | None = None,
+    wanted_text: str | None = None,
+    profile_saved: str | None = None,
 ):
+    """`wanted_text` : le nom cherché, quand seule une partie a été retrouvée
+    (`_is_partial_match`) ; `profile_saved` : le nom tout juste enregistré au
+    profil après un « changer le nom » réussi."""
     return templates.TemplateResponse(
         request,
         "upload_result.html",
@@ -240,6 +267,8 @@ def _render_preview(
             "error_message": error_message,
             "existing_events": existing_events,
             "sync_error": sync_error,
+            "wanted_text": wanted_text,
+            "profile_saved": profile_saved,
         },
     )
 
@@ -264,6 +293,8 @@ def _build_preview(
     matched_text: str | None,
     extractor: Callable[..., dict],
     calendar_lister: Callable[..., list[ExistingEvent]],
+    wanted_text: str | None = None,
+    profile_saved: str | None = None,
 ):
     """Appelle le modèle puis la validation locale (plan, sections 5C/5D).
 
@@ -298,6 +329,8 @@ def _build_preview(
             extraction=None,
             error_message=ERROR_MESSAGES[extraction.reason],
             existing_events=None,
+            wanted_text=wanted_text,
+            profile_saved=profile_saved,
         )
 
     (upload_dir / EXTRACTION_CACHE_NAME).write_text(json.dumps(raw), encoding="utf-8")
@@ -312,6 +345,8 @@ def _build_preview(
         extraction=extraction,
         error_message=None,
         existing_events=existing_events,
+        wanted_text=wanted_text,
+        profile_saved=profile_saved,
     )
 
 
@@ -324,6 +359,7 @@ def _result_response(
     *,
     extractor: Callable[..., dict],
     calendar_lister: Callable[..., list[ExistingEvent]],
+    profile_saved: str | None = None,
 ):
     pages = _page_paths(upload_dir)
     composed = compose_crop(pages, result)
@@ -342,6 +378,8 @@ def _result_response(
         matched_text=result.matched_text,
         extractor=extractor,
         calendar_lister=calendar_lister,
+        wanted_text=result.candidate_used if _is_partial_match(result) else None,
+        profile_saved=profile_saved,
     )
 
 
@@ -355,9 +393,7 @@ async def upload_pdf(
 ):
     content = await file.read()
     if len(content) > MAX_UPLOAD_BYTES:
-        return templates.TemplateResponse(
-            request, "upload.html", {"user": user, "error": "Le fichier dépasse 10 Mo."}
-        )
+        return _upload_page(request, user, "Le fichier dépasse 10 Mo.")
 
     upload_id = uuid.uuid4().hex
     upload_dir = _session_dir(request) / upload_id
@@ -369,20 +405,21 @@ async def upload_pdf(
         pages = render_pages(pdf_path, upload_dir / "pages")
     except Exception:  # noqa: BLE001 - fichier utilisateur non fiable, type d'erreur non garanti
         shutil.rmtree(upload_dir, ignore_errors=True)
-        return templates.TemplateResponse(
-            request, "upload.html", {"user": user, "error": "PDF illisible."}
-        )
+        return _upload_page(request, user, "PDF illisible.")
 
     if len(pages) > MAX_PAGES:
         shutil.rmtree(upload_dir, ignore_errors=True)
-        return templates.TemplateResponse(
-            request, "upload.html", {"user": user, "error": "Le PDF dépasse 10 pages."}
-        )
+        return _upload_page(request, user, "Le PDF dépasse 10 pages.")
 
+    searched = search_name_for(user)
     result = _run_locate(user, pdf_path)
 
     if isinstance(result, LocateResult):
-        set_pdf_name(user.email, result.candidate_used)
+        # Première réussite depuis le compte Google : le nom qui a marché
+        # (ex. « DUPONT J ») rejoint le profil ; un nom déjà enregistré n'est
+        # jamais réécrit sans que la personne le tape.
+        if not get_pdf_name(user.email):
+            set_pdf_name(user.email, result.candidate_used)
         return _result_response(
             request,
             user,
@@ -403,6 +440,7 @@ async def upload_pdf(
                 "reason": result.reason,
                 "matches": result.matches,
                 "tried": None,
+                "searched": searched,
             },
         )
 
@@ -419,7 +457,14 @@ def name_form(
     return templates.TemplateResponse(
         request,
         "upload_name.html",
-        {"user": user, "upload_id": upload_id, "reason": None, "matches": (), "tried": None},
+        {
+            "user": user,
+            "upload_id": upload_id,
+            "reason": None,
+            "matches": (),
+            "tried": None,
+            "searched": search_name_for(user),
+        },
     )
 
 
@@ -439,7 +484,6 @@ def retry_with_name(
     result = _run_locate(user, pdf_path, pdf_name_override=pdf_name)
 
     if isinstance(result, LocateResult):
-        _save_pdf_name_if_new(user, result.candidate_used, pdf_name)
         return _result_response(
             request,
             user,
@@ -448,6 +492,7 @@ def retry_with_name(
             result,
             extractor=extractor,
             calendar_lister=calendar_lister,
+            profile_saved=_save_pdf_name_if_new(user, result.candidate_used),
         )
 
     if result.reason in NAME_RETRY_REASONS:
@@ -463,6 +508,7 @@ def retry_with_name(
                 "reason": result.reason,
                 "matches": result.matches,
                 "tried": pdf_name,
+                "searched": None,
             },
         )
 

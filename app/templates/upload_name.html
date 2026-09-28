@@ -5,18 +5,33 @@
 <h1>{% if tried %}« {{ tried }} » désigne plusieurs lignes{% else %}Ton nom n'a pas été trouvé automatiquement{% endif %}</h1>
 <p>Plusieurs lignes correspondent : {{ matches | join(", ") }}. Tape une version
 plus précise (ex. « DUPONT J. » plutôt que « DUPONT »).</p>
-{% elif reason == "nom_introuvable" %}
-<h1>{% if tried %}« {{ tried }} » n'a pas été trouvé{% else %}Ton nom n'a pas été trouvé automatiquement{% endif %}</h1>
+{% elif reason == "nom_introuvable" and tried %}
+<h1>« {{ tried }} » n'a pas été trouvé</h1>
 <p>Ce nom n'apparaît pas dans le PDF, ni en entier ni mot par mot. Tape-le
 exactement comme il est écrit dedans.</p>
+{% elif reason == "nom_introuvable" %}
+<h1>Ta ligne n'a pas été trouvée</h1>
+<p>
+  {% if searched and searched.name %}
+  On a cherché « {{ searched.name }} »{% if searched.source == "google" %} (ton compte Google){% else %} (ton profil){% endif %}
+  sans le trouver dans ce planning.
+  {% else %}
+  Ton compte Google ne donne pas de nom de famille : l'appli ne sait pas quel nom chercher.
+  {% endif %}
+</p>
+<p>
+  Tape ton nom tel qu'il est écrit sur le planning. S'il n'affiche que les
+  prénoms, ton prénom seul suffit.
+</p>
 {% else %}
 <h1>Changer le nom recherché</h1>
 <p>Tape le nom tel qu'il apparaît dans le PDF, à l'endroit de ta ligne.</p>
 {% endif %}
 <form action="/upload/{{ upload_id }}/name" method="post" data-loading="{{ loading_message }}">
   <div class="field">
-    <input type="text" name="pdf_name" value="{{ tried or '' }}" required autofocus>
+    <input type="text" name="pdf_name" value="{{ tried or '' }}" placeholder="{% if user.given_name %}ex. {{ user.given_name }}{% if user.family_name %} ou {{ user.family_name }} {{ user.given_name }}{% endif %}{% else %}ex. Jean ou DUPONT Jean{% endif %}" required autofocus aria-label="Nom tel qu'il est écrit sur le planning">
   </div>
+  <p class="muted">Il sera enregistré dans <a href="/account">ton profil</a> : tu n'auras pas à le retaper la prochaine fois.</p>
   {% include "_ai_notice.html" %}
   <button type="submit">Valider</button>
 </form>

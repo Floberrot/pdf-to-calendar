@@ -14,6 +14,7 @@ from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
 from app.account import router as account_router
+from app.account import search_name_for
 from app.admin import router as admin_router
 from app.auth import CurrentUser, RedirectToLogin, require_user
 from app.auth import router as auth_router
@@ -62,4 +63,6 @@ def health() -> dict[str, str]:
 
 @app.get("/")
 def index(request: Request, user: Annotated[CurrentUser, Depends(require_user)]):
-    return templates.TemplateResponse(request, "index.html", {"user": user})
+    return templates.TemplateResponse(
+        request, "index.html", {"user": user, "search": search_name_for(user)}
+    )

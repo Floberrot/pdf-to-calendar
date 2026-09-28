@@ -14,7 +14,7 @@ from authlib.integrations.starlette_client import OAuth
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import RedirectResponse
 
-from app.db import upsert_user_seen
+from app.db import get_pdf_name, upsert_user_seen
 from app.log import log
 from app.settings import settings
 
@@ -70,6 +70,13 @@ def evaluate_login(userinfo: dict) -> tuple[bool, str]:
     return is_allowed(email), email
 
 
+def after_login_url(email: str) -> str:
+    """Tant qu'aucun nom n'est enregistré, la connexion mène au profil,
+    pré-rempli depuis le compte Google (demande utilisateur : mettre le profil
+    en avant pour ne pas retaper son nom à chaque dépôt)."""
+    return "/" if get_pdf_name(email) else "/account?bienvenue=1"
+
+
 @router.get("/login")
 async def login(request: Request):
     redirect_uri = request.url_for("auth_callback")
@@ -100,7 +107,7 @@ async def auth_callback(request: Request):
     }
     upsert_user_seen(email)
     log(request_id=request_id, email=email, step="login", status="ok")
-    return RedirectResponse(url="/")
+    return RedirectResponse(url=after_login_url(email))
 
 
 @router.get("/logout")

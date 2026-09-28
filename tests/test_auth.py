@@ -6,7 +6,8 @@ ami@example.com (allowed), admin@example.com (admin).
 
 from __future__ import annotations
 
-from app.auth import evaluate_login, is_admin, is_allowed
+from app.auth import after_login_url, evaluate_login, is_admin, is_allowed
+from app.db import set_pdf_name, upsert_user_seen
 
 
 def test_is_allowed_case_insensitive():
@@ -52,3 +53,15 @@ def test_evaluate_login_rejects_missing_email():
     ok, email = evaluate_login({"email_verified": True})
     assert not ok
     assert email == ""
+
+
+def test_after_login_goes_to_prefilled_profile_until_a_name_is_saved():
+    """Demande utilisateur : mettre le profil en avant pour ne pas retaper son
+    nom à chaque dépôt. Tant que rien n'est enregistré, la connexion mène au
+    profil pré-rempli depuis Google ; ensuite, directement à l'accueil."""
+    email = "ami-apres-connexion@example.com"
+    upsert_user_seen(email)
+    assert after_login_url(email) == "/account?bienvenue=1"
+
+    set_pdf_name(email, "DUPONT J.")
+    assert after_login_url(email) == "/"

@@ -1,0 +1,11 @@
+{# Nom cherché dans les plannings, rappelé partout où il compte (demande
+   utilisateur : mettre le profil en avant). Contexte : `search` (account.SearchName). #}
+<p class="profile-line">
+  {% if search.name %}
+  Ta ligne est cherchée sous le nom <strong>{{ search.name }}</strong>{% if search.source == "google" %} (repris de ton compte Google){% endif %}
+  · <a href="/account">{% if search.source == "profil" %}modifier{% else %}vérifier et enregistrer{% endif %}</a>
+  {% else %}
+  Aucun nom enregistré : l'appli ne pourra pas trouver ta ligne toute seule.
+  <a href="/account">Renseigne ton nom</a>
+  {% endif %}
+</p>

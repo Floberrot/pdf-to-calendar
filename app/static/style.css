@@ -14,6 +14,8 @@
   --error-fg: #9a2020;
   --success-bg: #e8f6ee;
   --success-fg: #1e7a42;
+  --warning-bg: #fdf4e3;
+  --warning-fg: #7a4a06;
   --radius: 10px;
 }
 
@@ -30,6 +32,8 @@
     --error-fg: #f3a5a5;
     --success-bg: #123423;
     --success-fg: #8fdcb0;
+    --warning-bg: #3a2c12;
+    --warning-fg: #f2cf8c;
   }
 }
 
@@ -240,10 +244,25 @@ button.is-loading::after {
 /* Messages */
 
 .error,
-.success {
+.success,
+.warning {
   padding: 0.75rem 1rem;
   border-radius: var(--radius);
   margin: 1rem 0;
+}
+
+.warning {
+  background: var(--warning-bg);
+  color: var(--warning-fg);
+}
+
+/* Nom cherché dans les plannings, rappelé en haut de l'accueil et du dépôt. */
+
+.profile-line {
+  padding: 0.6rem 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--card-bg);
 }
 
 .error {

@@ -3,6 +3,13 @@
 {% block content %}
 <h1>Voici ce qui a été trouvé</h1>
 {% if matched_text %}<p>Ligne trouvée : <strong>{{ matched_text }}</strong></p>{% endif %}
+{% if profile_saved %}<p class="success">« {{ profile_saved }} » est enregistré dans <a href="/account">ton profil</a> : il sera cherché directement la prochaine fois.</p>{% endif %}
+{% if wanted_text %}
+<p class="warning">
+  Seul « {{ matched_text }} » a été trouvé sur le planning, pas « {{ wanted_text }} »
+  en entier : vérifie sur l'image que c'est bien ta ligne avant de valider.
+</p>
+{% endif %}
 <img class="framed" src="/upload/{{ upload_id }}/image/composed.png">
 
 {% if error_message %}
