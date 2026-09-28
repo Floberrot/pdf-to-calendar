@@ -11,6 +11,7 @@ import io
 import json
 import logging
 import time
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Protocol
 
@@ -89,14 +90,21 @@ def _is_rate_limit(message: str) -> bool:
     return message.startswith("429") or "RESOURCE_EXHAUSTED" in message
 
 
+def _is_model_not_found(message: str) -> bool:
+    """404 NOT_FOUND : nom de modèle faux ou modèle retiré par Google. Ne
+    concerne que ce modèle-là, contrairement à une clé invalide."""
+    return message.startswith("404") or "NOT_FOUND" in message
+
+
 def _call_one_model(model: str, contents: list[Any], *, client: _Client) -> dict:
     """Appelle un modèle, renvoie le JSON de la réponse.
 
     Un `ServerError` (5xx, ex. « experiencing high demand ») déclenche un
     réessai : Google indique explicitement que ces pics sont temporaires.
     Le SDK réessaie déjà une fois en interne ; ça ne suffit pas toujours.
-    Un 5xx persistant ou un quota dépassé (429) lèvent `_ModelUnavailable` :
-    inutile d'insister sur ce modèle, mais un autre peut répondre.
+    Un 5xx persistant, un quota dépassé (429) ou un modèle introuvable (404)
+    lèvent `_ModelUnavailable` : inutile d'insister sur ce modèle, mais un
+    autre peut répondre.
     """
     for attempt in range(1, MAX_ATTEMPTS + 1):
         try:
@@ -117,6 +125,8 @@ def _call_one_model(model: str, contents: list[Any], *, client: _Client) -> dict
             message = _redact(str(exc))
             if _is_rate_limit(message):
                 raise _ModelUnavailable(message, rate_limited=True) from exc
+            if _is_model_not_found(message):
+                raise _ModelUnavailable(message, rate_limited=False) from exc
             raise ExtractError(f"Appel au modèle échoué : {message}") from exc
 
     raise ExtractError("Appel au modèle échoué : aucune tentative effectuée")
@@ -124,13 +134,15 @@ def _call_one_model(model: str, contents: list[Any], *, client: _Client) -> dict
 
 def _call_model(contents: list[Any], *, client: _Client) -> dict:
     """Essaie chaque modèle de `settings.llm_models` dans l'ordre, passe au
-    suivant dès que l'un est saturé (quota 429, ou 5xx persistant).
+    suivant dès que l'un est saturé (quota 429, ou 5xx persistant) ou
+    introuvable (404, nom faux dans LLM_MODELS).
 
     Retour utilisateur : « le modèle plante car trop de demandes ». Les quotas
     du tier gratuit sont comptés par modèle : quand le premier est à sec, le
     suivant a encore les siens. Toute autre erreur (clé invalide, requête
     refusée, JSON illisible) remonte tout de suite sans changer de modèle :
-    elle n'a rien à voir avec la charge et se reproduirait à l'identique.
+    elle n'a rien à voir avec un modèle en particulier et se reproduirait à
+    l'identique sur les suivants.
     """
     failures: list[str] = []
     only_rate_limits = True
@@ -174,11 +186,22 @@ def extract(image_png: bytes, *, client: _Client | None = None) -> dict:
     return data
 
 
-def health_check(*, client: _Client | None = None) -> None:
+@dataclass(frozen=True)
+class ModelHealth:
+    model: str
+    ok: bool
+    detail: str
+
+
+def health_check(*, client: _Client | None = None) -> list[ModelHealth]:
     """Test de santé (page admin, plan section 4) : image minimale, prompt
     trivial indépendant du schéma periode/creneaux, pour ne pas dépendre de
     la capacité du modèle à reconnaître un vrai planning dans une image de
-    test. Ne renvoie rien ; lève `ExtractError` si l'appel échoue."""
+    test.
+
+    Chaque modèle de LLM_MODELS est testé séparément, sans repli : avec le
+    repli, un nom faux en deuxième position passerait inaperçu tant que le
+    premier répond, et ne se révélerait que le jour où il sature."""
     if client is None:
         client = genai.Client(api_key=settings.llm_api_key)
 
@@ -190,4 +213,12 @@ def health_check(*, client: _Client | None = None) -> None:
         types.Part.from_bytes(data=buffer.getvalue(), mime_type="image/png"),
         _HEALTH_CHECK_PROMPT,
     ]
-    _call_model(contents, client=client)
+    results = []
+    for model in settings.llm_models:
+        try:
+            _call_one_model(model, contents, client=client)
+        except (_ModelUnavailable, ExtractError) as exc:
+            results.append(ModelHealth(model, ok=False, detail=str(exc)))
+        else:
+            results.append(ModelHealth(model, ok=True, detail="réponse JSON reçue"))
+    return results

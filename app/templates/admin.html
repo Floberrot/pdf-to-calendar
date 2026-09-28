@@ -9,12 +9,23 @@
     <form action="/admin/health/calendar" method="post">
       <button type="submit">Tester l'agenda</button>
     </form>
-    <form action="/admin/health/model" method="post">
-      <button type="submit">Tester le modèle</button>
+    <form action="/admin/health/model" method="post" data-loading="Test de chaque modèle en cours… ça peut prendre une minute ou deux si l'un d'eux est saturé.">
+      <button type="submit">Tester les modèles</button>
     </form>
   </div>
   {% if calendar_result %}<p>Agenda : {{ calendar_result }}</p>{% endif %}
-  {% if model_result %}<p>Modèle : {{ model_result }}</p>{% endif %}
+  {% if model_result %}<p>Modèles : {{ model_result }}</p>{% endif %}
+  {% if model_results %}
+  <ul class="health-list">
+    {% for health in model_results %}
+    <li>
+      <strong>{{ health.model }}</strong> :
+      {% if health.ok %}<span class="status-badge">OK</span> {{ health.detail }}
+      {% else %}<span class="status-badge status-badge--supprime">échec</span> {{ health.detail }}{% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+  {% endif %}
 </section>
 
 <section class="card">

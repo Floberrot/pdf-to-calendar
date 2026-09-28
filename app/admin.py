@@ -12,6 +12,7 @@ from fastapi.templating import Jinja2Templates
 from app.auth import CurrentUser, require_admin
 from app.calendar_sync import health_check as _calendar_health_check
 from app.db import list_recent_imports
+from app.llm import ModelHealth
 from app.llm import health_check as _model_health_check
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -23,7 +24,7 @@ def get_calendar_health_check() -> Callable[..., None]:
     return _calendar_health_check
 
 
-def get_model_health_check() -> Callable[..., None]:
+def get_model_health_check() -> Callable[..., list[ModelHealth]]:
     """Point d'injection pour les tests (fournisseur factice)."""
     return _model_health_check
 
@@ -34,6 +35,7 @@ def _render_admin(
     *,
     calendar_result: str | None = None,
     model_result: str | None = None,
+    model_results: list[ModelHealth] | None = None,
 ):
     email_filter = request.query_params.get("email") or None
     imports = list_recent_imports(email=email_filter)
@@ -46,6 +48,7 @@ def _render_admin(
             "email_filter": email_filter,
             "calendar_result": calendar_result,
             "model_result": model_result,
+            "model_results": model_results,
         },
     )
 
@@ -73,11 +76,14 @@ def health_calendar(
 def health_model(
     request: Request,
     user: Annotated[CurrentUser, Depends(require_admin)],
-    model_health_check: Annotated[Callable[..., None], Depends(get_model_health_check)],
+    model_health_check: Annotated[
+        Callable[..., list[ModelHealth]], Depends(get_model_health_check)
+    ],
 ):
+    """Un résultat par modèle de LLM_MODELS : la chaîne de repli n'est utile
+    que si chacun de ses maillons répond."""
     try:
-        model_health_check()
-        result = "OK : réponse JSON reçue."
+        results = model_health_check()
     except Exception as exc:  # noqa: BLE001 - diagnostic admin, la cause doit s'afficher
-        result = f"Échec : {exc}"
-    return _render_admin(request, user, model_result=result)
+        return _render_admin(request, user, model_result=f"Échec : {exc}")
+    return _render_admin(request, user, model_results=results)

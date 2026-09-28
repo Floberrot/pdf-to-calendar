@@ -27,7 +27,7 @@ exactement comme il est écrit dedans.</p>
 <h1>Changer le nom recherché</h1>
 <p>Tape le nom tel qu'il apparaît dans le PDF, à l'endroit de ta ligne.</p>
 {% endif %}
-<form action="/upload/{{ upload_id }}/name" method="post">
+<form action="/upload/{{ upload_id }}/name" method="post" data-loading="{{ loading_message }}">
   <div class="field">
     <input type="text" name="pdf_name" value="{{ tried or '' }}" placeholder="{% if user.given_name %}ex. {{ user.given_name }}{% if user.family_name %} ou {{ user.family_name }} {{ user.given_name }}{% endif %}{% else %}ex. Jean ou DUPONT Jean{% endif %}" required autofocus aria-label="Nom tel qu'il est écrit sur le planning">
   </div>

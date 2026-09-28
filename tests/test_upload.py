@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 from reportlab.lib.pagesizes import A4, landscape
 from reportlab.pdfgen import canvas
 
+from app import upload as upload_module
 from app.auth import CurrentUser, require_user
 from app.calendar_sync import ExistingEvent, SyncError, SyncResult
 from app.db import get_pdf_name, set_pdf_name, transaction, upsert_user_seen
@@ -761,3 +762,39 @@ def test_first_success_from_google_name_fills_the_profile(client, tmp_path):
     _upload(client, pdf_path)
 
     assert get_pdf_name(email) == "MARTIN Sophie"
+
+
+def test_upload_form_warns_that_analysis_can_take_minutes(client):
+    """Demande utilisateur : pendant l'envoi, prévenir que ça peut prendre
+    quelques minutes (app.js affiche data-loading sous le bouton)."""
+    _override_user()
+
+    response = client.get("/upload")
+
+    assert response.status_code == 200
+    assert "data-loading=" in response.text
+    assert "quelques minutes" in response.text
+
+
+def test_ai_notice_lists_every_model_of_the_chain(client, monkeypatch):
+    """Demande utilisateur : la mention IA doit refléter LLM_MODELS, repli compris."""
+    _override_user()
+    monkeypatch.setitem(
+        upload_module.templates.env.globals,
+        "llm_models",
+        ("gemini-a", "gemini-b", "gemini-c"),
+    )
+
+    response = client.get("/upload")
+
+    assert "gemini-a, puis en repli s'il est saturé : gemini-b, gemini-c" in response.text
+
+
+def test_ai_notice_single_model_mentions_no_fallback(client, monkeypatch):
+    _override_user()
+    monkeypatch.setitem(upload_module.templates.env.globals, "llm_models", ("gemini-seul",))
+
+    response = client.get("/upload")
+
+    assert "(gemini-seul)" in response.text
+    assert "repli" not in response.text

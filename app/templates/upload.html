@@ -4,7 +4,7 @@
 <h1>Déposer ton planning</h1>
 {% include "_search_name.html" %}
 {% if error %}<p class="error">{{ error }}</p>{% endif %}
-<form action="/upload" method="post" enctype="multipart/form-data">
+<form action="/upload" method="post" enctype="multipart/form-data" data-loading="{{ loading_message }}">
   <div class="field">
     <input type="file" name="file" accept="application/pdf" required>
   </div>

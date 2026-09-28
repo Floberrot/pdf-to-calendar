@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 
 from app.admin import get_calendar_health_check, get_model_health_check
 from app.auth import CurrentUser, require_admin, require_user
+from app.llm import ModelHealth
 from app.log import log
 from app.main import app
 
@@ -111,12 +112,34 @@ def test_health_calendar_failure_shows_error(client):
 
 def test_health_model_success_shows_ok(client):
     _override_admin()
-    app.dependency_overrides[get_model_health_check] = lambda: _noop
+    app.dependency_overrides[get_model_health_check] = lambda: (
+        lambda: [ModelHealth("gemini-test", ok=True, detail="réponse JSON reçue")]
+    )
 
     response = client.post("/admin/health/model")
 
     assert response.status_code == 200
+    assert "gemini-test" in response.text
     assert "OK" in response.text
+
+
+def test_health_model_shows_one_result_per_model(client):
+    """Un nom faux dans LLM_MODELS doit se voir ici, même si le premier
+    modèle de la chaîne répond."""
+    _override_admin()
+    app.dependency_overrides[get_model_health_check] = lambda: (
+        lambda: [
+            ModelHealth("gemini-premier", ok=True, detail="réponse JSON reçue"),
+            ModelHealth("gemini-faux", ok=False, detail="404 NOT_FOUND"),
+        ]
+    )
+
+    response = client.post("/admin/health/model")
+
+    assert response.status_code == 200
+    assert "gemini-premier" in response.text
+    assert "gemini-faux" in response.text
+    assert "404 NOT_FOUND" in response.text
 
 
 def test_health_model_failure_shows_error(client):

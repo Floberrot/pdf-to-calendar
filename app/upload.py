@@ -50,8 +50,13 @@ router = APIRouter(prefix="/upload", tags=["upload"])
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 # Fixe pour la vie du process (charge une fois au demarrage) : global Jinja
 # plutot que reinjecte dans le contexte de chaque TemplateResponse.
-templates.env.globals["llm_model"] = settings.llm_models[0]
-templates.env.globals["llm_fallback"] = len(settings.llm_models) > 1
+templates.env.globals["llm_models"] = settings.llm_models
+# Affiché par app.js sous le bouton pendant l'appel au modèle (demande
+# utilisateur : prévenir que ça peut être long, avec les replis de llm.py).
+templates.env.globals["loading_message"] = (
+    "Analyse en cours… Ça peut prendre quelques minutes si le modèle est saturé "
+    "(l'appli réessaie automatiquement). Garde la page ouverte."
+)
 
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 MAX_PAGES = 10
