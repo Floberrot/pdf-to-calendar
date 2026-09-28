@@ -24,8 +24,10 @@ from app.settings import settings
 
 logger = logging.getLogger("app")
 
-MAX_ATTEMPTS = 2
-RETRY_DELAY_SECONDS = 5
+# Pauses entre deux tentatives sur un même modèle saturé (5xx) : un pic de
+# demande dure souvent plus de quelques secondes, la dernière attend donc plus.
+RETRY_DELAYS_SECONDS = (5, 15)
+MAX_ATTEMPTS = len(RETRY_DELAYS_SECONDS) + 1
 
 _HEALTH_CHECK_PROMPT = 'Réponds uniquement avec cet objet JSON, sans rien ajouter : {"ok": true}'
 
@@ -69,18 +71,26 @@ class ExtractError(Exception):
     """Levée quand l'appel au modèle échoue ou renvoie un JSON inexploitable."""
 
 
-class RateLimitError(ExtractError):
+class ModelUnavailableError(ExtractError):
+    """Aucun modèle de LLM_MODELS n'a pu répondre : tous saturés (5xx
+    persistant, quota) ou introuvables (404, retirés par Google). L'image
+    n'y est pour rien et réessayer plus tard peut marcher, contrairement à
+    une réponse illisible."""
+
+
+class RateLimitError(ModelUnavailableError):
     """Levée quand le quota de l'API (tier gratuit) est atteint : inutile de
     réessayer tout de suite, contrairement à un `ServerError` transitoire."""
 
 
 class _ModelUnavailable(Exception):
-    """Interne à ce module : ce modèle est saturé (quota ou 5xx persistant),
-    le suivant de la chaîne peut prendre le relais."""
+    """Interne à ce module : ce modèle est saturé (quota ou 5xx persistant)
+    ou introuvable (404), le suivant de la chaîne peut prendre le relais."""
 
-    def __init__(self, message: str, *, rate_limited: bool):
+    def __init__(self, message: str, *, rate_limited: bool, not_found: bool = False):
         super().__init__(message)
         self.rate_limited = rate_limited
+        self.not_found = not_found
 
 
 class _GenerateContent(Protocol):
@@ -133,13 +143,13 @@ def _call_one_model(model: str, contents: list[Any], *, client: _Client) -> dict
         except ServerError as exc:
             if attempt == MAX_ATTEMPTS:
                 raise _ModelUnavailable(_redact(str(exc)), rate_limited=False) from exc
-            time.sleep(RETRY_DELAY_SECONDS)
+            time.sleep(RETRY_DELAYS_SECONDS[attempt - 1])
         except Exception as exc:
             message = _redact(str(exc))
             if _is_rate_limit(message):
                 raise _ModelUnavailable(message, rate_limited=True) from exc
             if _is_model_not_found(message):
-                raise _ModelUnavailable(message, rate_limited=False) from exc
+                raise _ModelUnavailable(message, rate_limited=False, not_found=True) from exc
             raise ExtractError(f"Appel au modèle échoué : {message}") from exc
 
     raise ExtractError("Appel au modèle échoué : aucune tentative effectuée")
@@ -165,7 +175,15 @@ def _call_model(contents: list[Any], *, client: _Client) -> dict:
         except _ModelUnavailable as exc:
             failures.append(f"{model} : {exc}")
             only_rate_limits = only_rate_limits and exc.rate_limited
-            logger.warning("Modèle %s indisponible : %s", model, exc)
+            if exc.not_found:
+                logger.warning(
+                    "Modèle %s introuvable chez Google (nom faux ou modèle retiré) : "
+                    "le retirer de LLM_MODELS. %s",
+                    model,
+                    exc,
+                )
+            else:
+                logger.warning("Modèle %s indisponible : %s", model, exc)
             continue
         if failures:
             logger.info("Réponse obtenue du modèle de repli %s", model)
@@ -177,7 +195,7 @@ def _call_model(contents: list[Any], *, client: _Client) -> dict:
         prefix = "Quota atteint sur tous les modèles" if several else "Quota du modèle atteint"
         raise RateLimitError(f"{prefix} : {detail}")
     prefix = "Appel échoué sur tous les modèles" if several else "Appel au modèle échoué"
-    raise ExtractError(f"{prefix} : {detail}")
+    raise ModelUnavailableError(f"{prefix} : {detail}")
 
 
 def extract(image_png: bytes, *, client: _Client | None = None) -> dict:

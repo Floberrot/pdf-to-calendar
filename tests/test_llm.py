@@ -11,7 +11,15 @@ import json
 import pytest
 from google.genai.errors import ServerError
 
-from app.llm import MAX_ATTEMPTS, ExtractError, RateLimitError, extract, health_check
+from app.llm import (
+    MAX_ATTEMPTS,
+    RETRY_DELAYS_SECONDS,
+    ExtractError,
+    ModelUnavailableError,
+    RateLimitError,
+    extract,
+    health_check,
+)
 from app.settings import settings
 
 
@@ -263,14 +271,15 @@ def test_extract_raises_rate_limit_error_when_every_model_is_exhausted(monkeypat
     assert "second" in str(exc_info.value)
 
 
-def test_extract_mixed_failures_raise_generic_extract_error(monkeypatch):
+def test_extract_mixed_failures_raise_model_unavailable_error(monkeypatch):
     """Quota sur l'un, panne sur l'autre : ce n'est plus un simple « quota
-    atteint », le message d'erreur générique convient mieux à la personne."""
+    atteint », mais c'est toujours la chaîne de modèles qui est saturée, pas
+    l'image qui est illisible."""
     monkeypatch.setattr("app.llm.time.sleep", lambda seconds: None)
     _with_models(monkeypatch, "premier", "second")
     client = _ChainClient({"premier": _quota_error(), "second": _server_error()})
 
-    with pytest.raises(ExtractError) as exc_info:
+    with pytest.raises(ModelUnavailableError) as exc_info:
         extract(b"fake-png-bytes", client=client)
 
     assert not isinstance(exc_info.value, RateLimitError)
@@ -305,6 +314,48 @@ def test_extract_skips_a_model_that_does_not_exist(monkeypatch):
 
     assert result == PAYLOAD
     assert client.calls == ["gemini-faux", "second"]
+
+
+def test_extract_saturated_and_retired_models_raise_model_unavailable_error(monkeypatch):
+    """Cas vu en production : les deux premiers modèles saturés (503), les
+    deux suivants retirés par Google (404). Rien à voir avec l'image : c'est
+    `ModelUnavailableError`, pas une erreur de lecture."""
+    monkeypatch.setattr("app.llm.time.sleep", lambda seconds: None)
+    _with_models(monkeypatch, "sature", "retire")
+    client = _ChainClient({"sature": _server_error(), "retire": _not_found_error()})
+
+    with pytest.raises(ModelUnavailableError) as exc_info:
+        extract(b"fake-png-bytes", client=client)
+
+    assert not isinstance(exc_info.value, RateLimitError)
+    assert "sature" in str(exc_info.value)
+    assert "retire" in str(exc_info.value)
+    assert client.calls == ["sature"] * MAX_ATTEMPTS + ["retire"]
+
+
+def test_extract_waits_longer_before_the_last_retry(monkeypatch):
+    """Un pic de demande dure souvent plus de quelques secondes : la dernière
+    tentative sur un modèle saturé attend plus longtemps que la première."""
+    waits: list[float] = []
+    monkeypatch.setattr("app.llm.time.sleep", waits.append)
+    _with_models(monkeypatch, "seul")
+    client = _ChainClient({"seul": _server_error()})
+
+    with pytest.raises(ModelUnavailableError):
+        extract(b"fake-png-bytes", client=client)
+
+    assert waits == list(RETRY_DELAYS_SECONDS)
+    assert waits == sorted(waits)
+    assert len(client.calls) == MAX_ATTEMPTS
+
+
+def test_extract_unreadable_answer_is_not_a_model_unavailability():
+    """Une réponse illisible n'est pas une saturation : le message « le modèle
+    n'a pas réussi à lire l'image » reste le bon."""
+    with pytest.raises(ExtractError) as exc_info:
+        extract(b"fake-png-bytes", client=_FakeClient("pas du json"))
+
+    assert not isinstance(exc_info.value, ModelUnavailableError)
 
 
 def test_health_check_tests_every_model_without_fallback(monkeypatch):
