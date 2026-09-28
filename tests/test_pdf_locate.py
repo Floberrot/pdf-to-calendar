@@ -77,10 +77,12 @@ def test_locate_finds_name_line_and_header(tmp_path):
 
     assert isinstance(result, LocateResult)
     assert result.matched_text.upper() == "BERNARD PAUL"
-    assert result.line.top < result.line.bottom
-    assert result.header.top < result.header.bottom
-    assert result.header.bottom <= result.line.top
-    assert result.table_left < result.table_right
+    (block,) = result.blocks
+    assert block.orientation == "rows"
+    assert block.line.top < block.line.bottom
+    assert block.header.top < block.header.bottom
+    assert block.header.bottom <= block.line.top
+    assert block.line.x0 < block.line.x1
 
 
 def test_locate_exposes_name_horizontal_bounds(tmp_path):
@@ -92,9 +94,10 @@ def test_locate_exposes_name_horizontal_bounds(tmp_path):
     result = locate(str(pdf_path), candidates=["BERNARD PAUL"])
 
     assert isinstance(result, LocateResult)
-    assert result.name_x0 < result.name_x1
-    assert result.table_left <= result.name_x0
-    assert result.name_x1 <= result.table_right
+    (block,) = result.blocks
+    assert block.name.x0 < block.name.x1
+    assert block.line.x0 <= block.name.x0
+    assert block.name.x1 <= block.line.x1
 
 
 def test_locate_person_spanning_two_row_heights(tmp_path):
@@ -104,7 +107,7 @@ def test_locate_person_spanning_two_row_heights(tmp_path):
     result = locate(str(pdf_path), candidates=["BERNARD PAUL"])
 
     assert isinstance(result, LocateResult)
-    assert (result.line.bottom - result.line.top) > ROW_HEIGHT * 1.5
+    assert result.blocks[0].line.height > ROW_HEIGHT * 1.5
 
 
 def test_locate_two_homonyms_returns_ambiguous(tmp_path):
@@ -119,14 +122,23 @@ def test_locate_two_homonyms_returns_ambiguous(tmp_path):
     assert len(result.matches) == 2
 
 
-def test_locate_table_without_lines_falls_back(tmp_path):
+def test_locate_table_without_lines_uses_the_blank_between_rows(tmp_path):
+    """Sans traits, la ligne s'arrête au milieu du blanc qui la sépare des
+    voisines (autrefois `pas_de_traits`, recadrage à la main obligatoire)."""
     pdf_path = tmp_path / "planning.pdf"
     _build_planning_pdf(pdf_path, names=NAMES, draw_lines=False)
 
     result = locate(str(pdf_path), candidates=["BERNARD PAUL"])
 
-    assert isinstance(result, LocateFailure)
-    assert result.reason == "pas_de_traits"
+    assert isinstance(result, LocateResult)
+    (block,) = result.blocks
+    # Ligne de base de « BERNARD Paul », comptée depuis le haut de la page
+    # (police par défaut de reportlab : Helvetica 12).
+    baseline = 60 + 15 + 3 * ROW_HEIGHT - 12
+    assert block.line.top < baseline < block.line.bottom
+    # « MARTIN Sophie » au-dessus et « DUBOIS Marie » en dessous restent dehors.
+    assert block.line.top > baseline - ROW_HEIGHT + 0.21 * 12
+    assert block.line.bottom < baseline + ROW_HEIGHT - 0.79 * 12
 
 
 def test_locate_name_not_found(tmp_path):
@@ -177,7 +189,7 @@ def test_locate_handles_full_day_month_year_dates(tmp_path):
     result = locate(str(pdf_path), candidates=["BERNARD PAUL"])
 
     assert isinstance(result, LocateResult)
-    assert result.header.top < result.header.bottom
+    assert result.blocks[0].header.height > 0
 
 
 def test_locate_finds_two_word_name_despite_small_vertical_offset(tmp_path):
@@ -290,7 +302,7 @@ def test_locate_word_fallback_prefers_the_line_matching_most_words(tmp_path):
 
     assert isinstance(result, LocateResult)
     assert result.matched_text == "Jean DUPONT"
-    assert result.name_x0 < result.name_x1
+    assert result.blocks[0].name.width > 0
 
 
 def test_locate_google_names_never_fall_back_to_given_name_alone(tmp_path):
@@ -377,3 +389,38 @@ def test_locate_without_family_name_never_matches_first_name_homonym(tmp_path):
 
     assert isinstance(result, LocateFailure)
     assert result.reason == "nom_introuvable"
+
+
+def test_build_candidates_long_pdf_name_tries_rotations():
+    """« Marie de la Fontaine » tapé, « DE LA FONTAINE Marie » sur le planning."""
+    candidates = build_candidates(pdf_name="Marie de la Fontaine", family_name="", given_name="")
+    assert candidates == [
+        "Marie de la Fontaine",
+        "Fontaine Marie de la",
+        "de la Fontaine Marie",
+    ]
+
+
+def test_locate_matches_words_glued_together_by_pdfplumber(tmp_path):
+    """Nom et prénom dessinés chacun de leur côté, sans caractère espace
+    entre eux : pdfplumber les colle en un seul mot (« DUPONTJean »), qui
+    doit quand même correspondre à « Jean DUPONT » tapé."""
+    pdf_path = tmp_path / "planning.pdf"
+    c = canvas.Canvas(str(pdf_path), pagesize=PAGE_SIZE)
+    top = PAGE_SIZE[1] - 60
+    for i, date_text in enumerate(DEFAULT_DATES):
+        c.drawString(LEFT + 120 + i * DATE_GAP, top, date_text)
+    y = top - 15
+    c.line(LEFT, y, RIGHT, y)
+    y -= ROW_HEIGHT
+    c.drawString(LEFT, y + 12, "DUPONT")
+    c.drawString(LEFT + c.stringWidth("DUPONT") + 1, y + 12, "Jean")
+    c.line(LEFT, y, RIGHT, y)
+    c.showPage()
+    c.save()
+
+    candidates = build_candidates(pdf_name="Jean DUPONT", family_name="", given_name="")
+    result = locate(str(pdf_path), candidates=candidates)
+
+    assert isinstance(result, LocateResult)
+    assert result.matched_text == "DUPONTJean"

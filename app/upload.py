@@ -326,7 +326,7 @@ def _result_response(
     calendar_lister: Callable[..., list[ExistingEvent]],
 ):
     pages = _page_paths(upload_dir)
-    composed = compose_crop(pages[result.page_index], result)
+    composed = compose_crop(pages, result)
     composed_path = upload_dir / "composed.png"
     composed.save(composed_path)
 
