@@ -657,8 +657,7 @@ def test_confirm_sync_failure_is_logged(client, tmp_path):
 
 
 def _override_known_user(email: str, *, given_name: str, family_name: str) -> None:
-    """Utilisateur avec une ligne en base (comme après une vraie connexion) :
-    sans elle, `set_pdf_name` ne met rien à jour et le profil reste vide."""
+    """Utilisateur avec une ligne en base, comme après une vraie connexion."""
     upsert_user_seen(email)
     _override_user(given_name=given_name, family_name=family_name)
     app.dependency_overrides[require_user] = lambda: CurrentUser(
@@ -762,6 +761,63 @@ def test_first_success_from_google_name_fills_the_profile(client, tmp_path):
     _upload(client, pdf_path)
 
     assert get_pdf_name(email) == "MARTIN Sophie"
+
+
+def _override_session_only_user(email: str, *, given_name: str, family_name: str) -> None:
+    """Session valide mais aucune ligne en base : le cas réel derrière le
+    retour « jamais reconnu même quand on save » (cookie de session qui
+    survit à un redéploiement sur une base neuve)."""
+    _override_user(given_name=given_name, family_name=family_name)
+    app.dependency_overrides[require_user] = lambda: CurrentUser(
+        email=email,
+        name="Ami",
+        is_admin=False,
+        given_name=given_name,
+        family_name=family_name,
+    )
+
+
+def test_name_saved_on_profile_is_found_on_next_upload_without_database_row(client, tmp_path):
+    """Retour utilisateur : le nom enregistré au profil n'était jamais repris.
+    Nom Google absent du planning, nom du planning enregistré au profil : le
+    dépôt suivant doit trouver la ligne directement."""
+    email = "ami-profil-puis-depot@example.com"
+    _override_session_only_user(email, given_name="Inconnue", family_name="PERSONNE")
+    pdf_path = tmp_path / "planning.pdf"
+    _build_planning_pdf(pdf_path)
+
+    saved = client.post("/account", data={"pdf_name": "MARTIN Sophie"})
+    page = client.get("/upload")
+    response = _upload(client, pdf_path)
+
+    assert "cherchera « MARTIN Sophie »" in saved.text
+    assert "sous le nom <strong>MARTIN Sophie</strong>" in page.text
+    assert "Voici ce qui a été trouvé" in response.text
+    assert "MARTIN Sophie" in response.text
+
+
+def test_first_success_fills_the_profile_without_database_row(client, tmp_path):
+    email = "ami-premier-succes-sans-ligne@example.com"
+    _override_session_only_user(email, given_name="Sophie", family_name="MARTIN")
+    pdf_path = tmp_path / "planning.pdf"
+    _build_planning_pdf(pdf_path)
+
+    _upload(client, pdf_path)
+
+    assert get_pdf_name(email) == "MARTIN Sophie"
+
+
+def test_typed_name_is_saved_without_database_row(client, tmp_path):
+    email = "ami-nom-tape-sans-ligne@example.com"
+    _override_session_only_user(email, given_name="Inconnue", family_name="PERSONNE")
+    pdf_path = tmp_path / "planning.pdf"
+    _build_planning_pdf(pdf_path)
+    upload_id = _upload_id_from(_upload(client, pdf_path).text, suffix="name")
+
+    response = client.post(f"/upload/{upload_id}/name", data={"pdf_name": "MARTIN Sophie"})
+
+    assert get_pdf_name(email) == "MARTIN Sophie"
+    assert "« MARTIN Sophie » est enregistré dans" in response.text
 
 
 def test_upload_form_warns_that_analysis_can_take_minutes(client):

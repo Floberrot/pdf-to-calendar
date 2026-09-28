@@ -11,7 +11,7 @@ from fastapi.templating import Jinja2Templates
 
 from app.auth import CurrentUser, require_admin
 from app.calendar_sync import health_check as _calendar_health_check
-from app.db import list_recent_imports
+from app.db import list_recent_imports, list_users, storage_status
 from app.llm import ModelHealth
 from app.llm import health_check as _model_health_check
 
@@ -49,6 +49,8 @@ def _render_admin(
             "calendar_result": calendar_result,
             "model_result": model_result,
             "model_results": model_results,
+            "storage": storage_status(),
+            "users": list_users(),
         },
     )
 

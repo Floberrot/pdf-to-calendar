@@ -29,6 +29,39 @@
 </section>
 
 <section class="card">
+  <h2>Stockage et comptes</h2>
+  <p>Base : <code>{{ storage.path }}</code></p>
+  {% if storage.mount_point %}
+  <p>Sur un volume monté (<code>{{ storage.mount_point }}</code>) : les noms enregistrés et le journal survivent aux redéploiements.</p>
+  {% else %}
+  <p class="warning">
+    Aucun volume monté : la base vit dans le conteneur et elle est effacée à
+    chaque redéploiement, noms enregistrés compris. Sur Railway, attache un
+    volume monté sur <code>/data</code> et mets <code>DATA_DIR=/data</code>
+    (README, étapes manuelles).
+  </p>
+  {% endif %}
+  <div class="table-scroll">
+    <table>
+      <thead>
+        <tr><th>Email</th><th>Nom enregistré</th><th>Vu pour la dernière fois</th></tr>
+      </thead>
+      <tbody>
+        {% for account in users %}
+        <tr>
+          <td>{{ account.email }}</td>
+          <td>{{ account.pdf_name or "—" }}</td>
+          <td>{{ account.last_seen or "" }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="3">Aucun compte en base.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="card">
   <h2>Journal des imports</h2>
   <form class="filter-form" action="/admin" method="get">
     <input type="text" name="email" placeholder="Filtrer par email" value="{{ email_filter or '' }}">

@@ -29,3 +29,14 @@ def _init_test_db():
     from app.db import init_db
 
     init_db()
+
+
+@pytest.fixture(autouse=True)
+def _fresh_users():
+    """Chaque test part sans aucun compte en base. Depuis que l'enregistrement
+    du nom crée la ligne au besoin (`db.set_pdf_name`), un nom sauvé par un
+    test serait sinon cherché par le suivant qui partage le même e-mail."""
+    from app.db import transaction
+
+    with transaction() as conn:
+        conn.execute("DELETE FROM users")

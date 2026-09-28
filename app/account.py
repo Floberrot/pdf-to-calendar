@@ -50,7 +50,12 @@ def _google_name(user: CurrentUser) -> str:
     return f"{user.given_name} {user.family_name}".strip()
 
 
-def _render(request: Request, user: CurrentUser, *, saved: bool = False, welcome: bool = False):
+def _render(
+    request: Request, user: CurrentUser, *, submitted: str | None = None, welcome: bool = False
+):
+    """`submitted` : le nom qui vient d'être envoyé (None hors enregistrement).
+    Le message affiché dépend de ce que la base contient vraiment, relu
+    ici : avant, « Enregistré » s'affichait même quand rien ne l'était."""
     saved_name = get_pdf_name(user.email)
     return templates.TemplateResponse(
         request,
@@ -59,7 +64,7 @@ def _render(request: Request, user: CurrentUser, *, saved: bool = False, welcome
             "user": user,
             "search": search_name_for(user),
             "prefill": saved_name or _google_name(user),
-            "saved": saved,
+            "submitted": submitted,
             "welcome": welcome,
         },
     )
@@ -84,5 +89,6 @@ def account_save(
     "" de la même façon). Valeur par défaut nécessaire sur `pdf_name` : sans
     elle, un formulaire soumis avec le champ vide est rejeté (422) plutôt que
     reçu comme une chaîne vide."""
-    set_pdf_name(user.email, pdf_name.strip())
-    return _render(request, user, saved=True)
+    submitted = pdf_name.strip()
+    set_pdf_name(user.email, submitted)
+    return _render(request, user, submitted=submitted)

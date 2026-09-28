@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from fastapi.testclient import TestClient
 
+from app import admin as admin_module
 from app.admin import get_calendar_health_check, get_model_health_check
 from app.auth import CurrentUser, require_admin, require_user
+from app.db import StorageStatus, set_pdf_name
 from app.llm import ModelHealth
 from app.log import log
 from app.main import app
@@ -164,3 +168,41 @@ def test_health_calendar_forbidden_for_non_admin(client):
     response = client.post("/admin/health/calendar")
 
     assert response.status_code == 403
+
+
+def test_admin_lists_accounts_with_their_saved_name(client):
+    """Pour vérifier d'un coup d'œil que les noms du profil sont bien en base
+    (retour utilisateur : « jamais reconnu même quand on save »)."""
+    set_pdf_name("ami-admin-liste@example.com", "BERROT Florian")
+    _override_admin()
+
+    response = client.get("/admin")
+
+    assert "ami-admin-liste@example.com" in response.text
+    assert "BERROT Florian" in response.text
+
+
+def test_admin_warns_when_the_database_is_not_on_a_volume(client, monkeypatch):
+    monkeypatch.setattr(
+        admin_module, "storage_status", lambda: StorageStatus(Path("/app/data/app.db"), None)
+    )
+    _override_admin()
+
+    response = client.get("/admin")
+
+    assert "Aucun volume monté" in response.text
+    assert "DATA_DIR=/data" in response.text
+
+
+def test_admin_confirms_the_database_is_on_a_volume(client, monkeypatch):
+    monkeypatch.setattr(
+        admin_module,
+        "storage_status",
+        lambda: StorageStatus(Path("/data/app.db"), Path("/data")),
+    )
+    _override_admin()
+
+    response = client.get("/admin")
+
+    assert "Sur un volume monté" in response.text
+    assert "Aucun volume monté" not in response.text
