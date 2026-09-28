@@ -198,3 +198,78 @@ def test_validate_drops_jour_incertain_on_same_date_as_creneau():
     assert isinstance(result, ValidatedExtraction)
     assert len(result.creneaux) == 1
     assert result.jours_incertains == []
+
+
+def test_validate_normalizes_hours_written_like_on_the_planning():
+    """Le modèle recopie parfois l'horaire tel qu'écrit (« 9h », « 8h30 ») au
+    lieu de HH:MM : on normalise plutôt que de rejeter tout le planning."""
+    raw = _raw(
+        "2026-09-14",
+        "2026-09-20",
+        [
+            {"date": "2026-09-14", "debut": "9h", "fin": "17h30", "lieu": ""},
+            {"date": "2026-09-15", "debut": "8.30", "fin": "16:00", "lieu": ""},
+            {"date": "2026-09-16", "debut": "16:00", "fin": "24:00", "lieu": ""},
+        ],
+    )
+
+    result = validate(raw, validation_weeks=8, today=TODAY)
+
+    assert isinstance(result, ValidatedExtraction)
+    assert [(c.debut, c.fin) for c in result.creneaux] == [
+        ("09:00", "17:30"),
+        ("08:30", "16:00"),
+        ("16:00", "00:00"),
+    ]
+    assert result.creneaux[2].duration_hours == 8
+
+
+def test_validate_rejects_a_range_given_as_start_hour():
+    raw = _raw(
+        "2026-09-14",
+        "2026-09-20",
+        [{"date": "2026-09-14", "debut": "9h-17h", "fin": "17:00", "lieu": ""}],
+    )
+
+    result = validate(raw, validation_weeks=8, today=TODAY)
+
+    assert isinstance(result, ValidationError)
+    assert result.reason == "creneau_invalide"
+
+
+def test_validate_accepts_french_dates():
+    raw = _raw(
+        "14/09/2026",
+        "20/09/2026",
+        [{"date": "15/09/2026", "debut": "09:00", "fin": "17:00", "lieu": ""}],
+    )
+
+    result = validate(raw, validation_weeks=8, today=TODAY)
+
+    assert isinstance(result, ValidatedExtraction)
+    assert result.periode_debut == date(2026, 9, 14)
+    assert result.creneaux[0].date == date(2026, 9, 15)
+
+
+def test_validate_accepts_a_monthly_planning_that_started_weeks_ago():
+    """Planning de tout le mois déposé en fin de mois : il commence plus de
+    deux semaines avant aujourd'hui, mais recoupe bien la fenêtre."""
+    raw = _raw(
+        "2026-09-01",
+        "2026-09-30",
+        [{"date": "2026-09-02", "debut": "09:00", "fin": "17:00", "lieu": ""}],
+    )
+
+    result = validate(raw, validation_weeks=8, today=date(2026, 9, 28))
+
+    assert isinstance(result, ValidatedExtraction)
+
+
+def test_validate_rejects_a_period_entirely_before_the_window():
+    """Année mal lue (2025 au lieu de 2026) : aucun recoupement, rejet."""
+    raw = _raw("2025-09-14", "2025-09-20", [])
+
+    result = validate(raw, validation_weeks=8, today=TODAY)
+
+    assert isinstance(result, ValidationError)
+    assert result.reason == "periode_hors_fenetre"
