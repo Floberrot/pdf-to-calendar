@@ -175,10 +175,12 @@ def test_health_check_succeeds_on_trivial_json_without_periode_creneaux():
     reel : un JSON trivial suffit, contrairement a extract()."""
     client = _FakeClient(json.dumps({"ok": True}))
 
-    health_check(client=client)  # ne doit pas lever
+    results = health_check(client=client)
+
+    assert [(r.model, r.ok) for r in results] == [(settings.llm_models[0], True)]
 
 
-def test_health_check_raises_extract_error_on_provider_exception():
+def test_health_check_reports_provider_exception_as_failed_model():
     class _BrokenModels:
         def generate_content(self, **kwargs):
             raise RuntimeError("panne modele simulee")
@@ -186,8 +188,10 @@ def test_health_check_raises_extract_error_on_provider_exception():
     class _BrokenClient:
         models = _BrokenModels()
 
-    with pytest.raises(ExtractError):
-        health_check(client=_BrokenClient())
+    [result] = health_check(client=_BrokenClient())
+
+    assert not result.ok
+    assert "panne modele simulee" in result.detail
 
 
 PAYLOAD = {"periode": {"debut": "2026-09-14", "fin": "2026-09-20"}, "creneaux": []}
@@ -282,3 +286,46 @@ def test_extract_does_not_fall_back_on_non_capacity_errors(monkeypatch):
         extract(b"fake-png-bytes", client=client)
 
     assert client.calls == ["premier"]
+
+
+def _not_found_error() -> RuntimeError:
+    return RuntimeError(
+        "404 NOT_FOUND. {'error': {'code': 404, 'message': 'models/gemini-faux is not "
+        "found for API version v1beta', 'status': 'NOT_FOUND'}}"
+    )
+
+
+def test_extract_skips_a_model_that_does_not_exist(monkeypatch):
+    """Nom faux ou modèle retiré par Google dans LLM_MODELS : ça ne concerne
+    que ce modèle, le suivant peut répondre (contrairement à une clé invalide)."""
+    _with_models(monkeypatch, "gemini-faux", "second")
+    client = _ChainClient({"gemini-faux": _not_found_error(), "second": json.dumps(PAYLOAD)})
+
+    result = extract(b"fake-png-bytes", client=client)
+
+    assert result == PAYLOAD
+    assert client.calls == ["gemini-faux", "second"]
+
+
+def test_health_check_tests_every_model_without_fallback(monkeypatch):
+    """Avec le repli, un nom faux en deuxième position passerait inaperçu tant
+    que le premier répond : le test de santé essaie chaque modèle séparément."""
+    _with_models(monkeypatch, "premier", "gemini-faux", "troisieme")
+    client = _ChainClient(
+        {
+            "premier": json.dumps({"ok": True}),
+            "gemini-faux": _not_found_error(),
+            "troisieme": _quota_error(),
+        }
+    )
+
+    results = health_check(client=client)
+
+    assert [(r.model, r.ok) for r in results] == [
+        ("premier", True),
+        ("gemini-faux", False),
+        ("troisieme", False),
+    ]
+    assert "NOT_FOUND" in results[1].detail
+    assert "RESOURCE_EXHAUSTED" in results[2].detail
+    assert client.calls == ["premier", "gemini-faux", "troisieme"]

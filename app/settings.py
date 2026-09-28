@@ -20,8 +20,10 @@ REQUIRED_VARS = [
     "CALENDAR_ID",
     "GOOGLE_SERVICE_ACCOUNT_JSON",
     "LLM_API_KEY",
-    "LLM_MODEL",
 ]
+# LLM_MODELS (nom au pluriel, le plus parlant pour une liste) ou, à défaut,
+# l'ancien LLM_MODEL : les deux acceptés pour ne rien casser côté Railway.
+MODEL_VARS = ("LLM_MODELS", "LLM_MODEL")
 
 
 def _parse_emails(raw: str) -> frozenset[str]:
@@ -38,7 +40,7 @@ class Settings:
     calendar_id: str
     google_service_account_json: str
     llm_api_key: str
-    llm_models: tuple[str, ...]  # du préféré au repli (LLM_MODEL, séparés par des virgules)
+    llm_models: tuple[str, ...]  # du préféré au repli (LLM_MODELS, séparés par des virgules)
     tz: str
     validation_weeks: int
     data_dir: str
@@ -48,6 +50,8 @@ def load_settings(env: dict[str, str] | None = None) -> Settings:
     env = os.environ if env is None else env
 
     missing = [name for name in REQUIRED_VARS if name not in env]
+    if not any(env.get(name, "").strip() for name in MODEL_VARS):
+        missing.append("LLM_MODELS")
     if missing:
         raise RuntimeError("Variables d'environnement manquantes : " + ", ".join(missing))
 
@@ -56,9 +60,10 @@ def load_settings(env: dict[str, str] | None = None) -> Settings:
     except ValueError as exc:
         raise RuntimeError("VALIDATION_WEEKS doit être un entier") from exc
 
-    llm_models = tuple(model.strip() for model in env["LLM_MODEL"].split(",") if model.strip())
+    raw_models = next(env[name] for name in MODEL_VARS if env.get(name, "").strip())
+    llm_models = tuple(model.strip() for model in raw_models.split(",") if model.strip())
     if not llm_models:
-        raise RuntimeError("LLM_MODEL doit contenir au moins un modèle")
+        raise RuntimeError("LLM_MODELS doit contenir au moins un modèle")
 
     return Settings(
         google_client_id=env["GOOGLE_CLIENT_ID"],

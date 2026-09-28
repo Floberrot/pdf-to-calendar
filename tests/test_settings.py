@@ -39,6 +39,32 @@ def test_load_settings_empty_llm_model_raises():
         load_settings(dict(BASE_ENV, LLM_MODEL=" , "))
 
 
+def test_load_settings_llm_models_takes_precedence_over_llm_model():
+    """LLM_MODELS, nom au pluriel pour une liste ; LLM_MODEL reste accepté
+    pour ne rien casser sur un déploiement existant."""
+    env = dict(BASE_ENV, LLM_MODELS="gemini-a,gemini-b")
+    assert load_settings(env).llm_models == ("gemini-a", "gemini-b")
+
+
+def test_load_settings_llm_models_alone_is_enough():
+    env = {key: value for key, value in BASE_ENV.items() if key != "LLM_MODEL"}
+    env["LLM_MODELS"] = "gemini-a"
+    assert load_settings(env).llm_models == ("gemini-a",)
+
+
+def test_load_settings_empty_llm_models_falls_back_to_llm_model():
+    """Variable LLM_MODELS créée mais laissée vide sur Railway : l'ancienne
+    valeur continue de servir plutôt que de faire planter le démarrage."""
+    env = dict(BASE_ENV, LLM_MODELS="  ")
+    assert load_settings(env).llm_models == ("model",)
+
+
+def test_load_settings_without_any_model_variable_raises():
+    env = {key: value for key, value in BASE_ENV.items() if key != "LLM_MODEL"}
+    with pytest.raises(RuntimeError, match="LLM_MODELS"):
+        load_settings(env)
+
+
 def test_load_settings_missing_var_raises():
     with pytest.raises(RuntimeError):
         load_settings({"GOOGLE_CLIENT_ID": "id"})

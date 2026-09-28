@@ -13,7 +13,7 @@ exactement comme il est écrit dedans.</p>
 <h1>Changer le nom recherché</h1>
 <p>Tape le nom tel qu'il apparaît dans le PDF, à l'endroit de ta ligne.</p>
 {% endif %}
-<form action="/upload/{{ upload_id }}/name" method="post">
+<form action="/upload/{{ upload_id }}/name" method="post" data-loading="{{ loading_message }}">
   <div class="field">
     <input type="text" name="pdf_name" value="{{ tried or '' }}" required autofocus>
   </div>
