@@ -10,7 +10,10 @@
   en entier : vérifie sur l'image que c'est bien ta ligne avant de valider.
 </p>
 {% endif %}
-<img class="framed" src="/upload/{{ upload_id }}/image/composed.png">
+<a class="image-link" href="/upload/{{ upload_id }}/image/composed.png" target="_blank" rel="noopener">
+  <img class="framed" src="/upload/{{ upload_id }}/image/composed.png" alt="Découpe analysée : en-tête des dates et ta ligne">
+</a>
+<p class="muted image-hint">Clique ou touche l'image pour l'ouvrir en grand.</p>
 
 {% if error_message %}
 <p class="error">{{ error_message }}</p>
@@ -31,26 +34,40 @@
 </p>
 {% endif %}
 {% if extraction.creneaux %}
-<div class="table-scroll">
-  <table>
-    <thead>
-      <tr><th>Date</th><th>Début</th><th>Fin</th><th>Lieu</th><th>Durée</th></tr>
-    </thead>
-    <tbody>
-      {% for creneau in extraction.creneaux %}
-      <tr>
-        <td>{{ creneau.date.strftime("%d/%m/%Y") }}</td>
-        <td>{{ creneau.debut }}</td>
-        <td>{{ creneau.fin }}</td>
-        <td>{{ creneau.lieu }}</td>
-        <td>{{ creneau.duration_hours }} h</td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
-</div>
+<p class="preview-summary">
+  <strong>{{ resume.creneaux }} créneau{% if resume.creneaux > 1 %}x{% endif %}</strong>
+  · {{ resume.heures | duree }} au total
+  · {{ resume.jours_travailles }} jour{% if resume.jours_travailles > 1 %}s{% endif %} travaillé{% if resume.jours_travailles > 1 %}s{% endif %}
+  {% if resume.jours_incertains %}· <span class="summary-uncertain">{{ resume.jours_incertains }} jour{% if resume.jours_incertains > 1 %}s{% endif %} à vérifier</span>{% endif %}
+</p>
 {% else %}
 <p>Aucun créneau de travail sur cette période (semaine de repos).</p>
+{% endif %}
+{% if extraction.creneaux or extraction.jours_incertains %}
+{% include "_semaines.html" %}
+{% endif %}
+{% if extraction.creneaux %}
+<details class="slot-details">
+  <summary>Liste détaillée des {{ resume.creneaux }} créneau{% if resume.creneaux > 1 %}x{% endif %}</summary>
+  <div class="table-scroll">
+    <table>
+      <thead>
+        <tr><th>Date</th><th>Début</th><th>Fin</th>{% if has_lieu %}<th>Lieu</th>{% endif %}<th>Durée</th></tr>
+      </thead>
+      <tbody>
+        {% for creneau in extraction.creneaux %}
+        <tr>
+          <td>{{ creneau.date.strftime("%d/%m/%Y") }}</td>
+          <td>{{ creneau.debut }}</td>
+          <td>{{ creneau.fin }}</td>
+          {% if has_lieu %}<td>{{ creneau.lieu }}</td>{% endif %}
+          <td>{{ creneau.duration_hours | duree }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</details>
 {% endif %}
 
 {% if extraction.jours_incertains %}
@@ -73,6 +90,10 @@
 {% elif existing_events %}
 <p>{{ existing_events | length }} événement(s) déjà importé(s), qui seront remplacés à la
   validation :</p>
+{# Au-delà de quelques lignes (un mois déjà importé), la liste est repliée
+   pour ne pas repousser le bouton Valider tout en bas. #}
+{% set long_list = existing_events | length > 5 %}
+{% if long_list %}<details class="slot-details"><summary>Voir les {{ existing_events | length }} événements</summary>{% endif %}
 <ul>
   {% for event in existing_events %}
   <li>
@@ -82,14 +103,17 @@
   </li>
   {% endfor %}
 </ul>
+{% if long_list %}</details>{% endif %}
 {% else %}
 <p class="muted">Aucun événement déjà importé sur cette période.</p>
 {% endif %}
 
 {% if sync_error %}<p class="error">{{ sync_error }}</p>{% endif %}
-<div class="actions">
+{# Collé en bas de l'écran : sur un gros import, plus besoin de descendre
+   tout en bas de la page pour valider. #}
+<div class="actions confirm-bar">
   <form action="/upload/{{ upload_id }}/confirm" method="post" data-loading="Écriture dans ton agenda…">
-    <button type="submit">Valider</button>
+    <button type="submit">{% if resume.creneaux > 1 %}Valider les {{ resume.creneaux }} créneaux{% elif resume.creneaux == 1 %}Valider le créneau{% else %}Valider{% endif %}</button>
   </form>
 </div>
 {% endif %}

@@ -542,6 +542,43 @@ def test_validation_failure_is_logged_with_the_period_read(client, tmp_path):
     assert "2020-01-06" in row["detail"]
 
 
+def test_preview_shows_slots_week_by_week_with_a_summary(client, tmp_path):
+    response = _upload_with_extractor(client, tmp_path, _default_extractor)
+
+    assert 'class="week-grid"' in response.text
+    assert "1 créneau</strong>" in response.text
+    assert "8 h au total" in response.text
+    assert "Valider le créneau" in response.text
+
+
+def test_big_import_stays_readable(client, tmp_path):
+    """Retour utilisateur : « dans le cas d'un gros import, les créneaux ne
+    sont pas visibles ». Quatre semaines : une grille de quatre lignes, la
+    liste détaillée repliée, et le nombre de créneaux sur le bouton Valider."""
+
+    def _month_extractor(image_png: bytes) -> dict:
+        start = datetime.now(UTC).date()
+        days = [start + timedelta(days=i) for i in range(28)]
+        return {
+            "periode": {"debut": days[0].isoformat(), "fin": days[-1].isoformat()},
+            "creneaux": [
+                {"date": d.isoformat(), "debut": "06:00", "fin": "14:00", "lieu": ""}
+                for d in days
+                if d.weekday() < 5
+            ],
+        }
+
+    response = _upload_with_extractor(client, tmp_path, _month_extractor)
+
+    assert response.status_code == 200
+    assert "20 créneaux</strong>" in response.text
+    assert "160 h au total" in response.text
+    assert "<summary>Liste détaillée des 20 créneaux</summary>" in response.text
+    assert "Valider les 20 créneaux" in response.text
+    # Aucun lieu indiqué : pas de colonne Lieu vide dans la liste détaillée.
+    assert "<th>Lieu</th>" not in response.text
+
+
 def test_upload_pdf_validation_failure_shows_error_message(client, tmp_path):
     def _bad_periode_extractor(image_png: bytes) -> dict:
         today = datetime.now(UTC).date()

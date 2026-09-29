@@ -370,3 +370,144 @@ pre {
   border-top: 1px solid var(--border);
   color: var(--muted);
 }
+
+/* Prévisualisation : créneaux semaine par semaine (app/preview.py) */
+
+.image-link {
+  display: inline-block;
+}
+
+.image-hint {
+  font-size: 0.85rem;
+  margin-top: 0.25rem;
+}
+
+.preview-summary {
+  margin: 0.25rem 0 0.75rem;
+}
+
+.summary-uncertain {
+  color: var(--warning-fg);
+  font-weight: 600;
+}
+
+.week-grid {
+  table-layout: fixed;
+  min-width: 21rem;
+  font-size: 0.78rem;
+}
+
+.week-grid th {
+  text-align: center;
+  color: var(--muted);
+  padding: 0.3rem 0.2rem;
+}
+
+.week-grid td {
+  vertical-align: top;
+  white-space: normal;
+  padding: 0.3rem 0.3rem 0.4rem;
+  border: 1px solid var(--border);
+  height: 3.2rem;
+}
+
+.week-grid tbody tr:hover {
+  background: none;
+}
+
+.week-grid .day-label {
+  display: block;
+  color: var(--muted);
+  font-size: 0.7rem;
+  margin-bottom: 0.15rem;
+}
+
+.week-grid .slot {
+  display: block;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.week-grid .slot-end::before {
+  content: "–";
+}
+
+.week-grid .slot + .slot {
+  margin-top: 0.2rem;
+}
+
+.week-grid .slot-place,
+.week-grid .slot-uncertain {
+  display: block;
+  font-size: 0.7rem;
+  overflow-wrap: anywhere;
+}
+
+.week-grid .is-outside {
+  background: color-mix(in srgb, var(--border) 45%, transparent);
+}
+
+.week-grid .is-uncertain {
+  background: var(--warning-bg);
+  color: var(--warning-fg);
+}
+
+.week-grid .is-uncertain .day-label {
+  color: inherit;
+}
+
+.week-grid .week-total {
+  text-align: right;
+  vertical-align: middle;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* Écran étroit : début et fin l'un sous l'autre, plutôt qu'un tiret seul sur
+   sa ligne ; la grille tient alors dans la largeur d'un téléphone. */
+@media (max-width: 560px) {
+  .week-grid td {
+    padding: 0.25rem 0.2rem 0.35rem;
+  }
+
+  .week-grid .slot-start,
+  .week-grid .slot-end {
+    display: block;
+  }
+
+  .week-grid .slot-end {
+    font-weight: 500;
+  }
+
+  .week-grid .slot-end::before {
+    content: none;
+  }
+
+  .week-grid .slot + .slot {
+    margin-top: 0.3rem;
+    padding-top: 0.2rem;
+    border-top: 1px dotted var(--border);
+  }
+}
+
+.slot-details {
+  margin: 0.75rem 0 1rem;
+}
+
+.slot-details summary {
+  cursor: pointer;
+  color: var(--accent);
+}
+
+/* Bouton Valider collé en bas de l'écran, même au milieu d'un long import. */
+
+.confirm-bar {
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  margin: 1rem 0 0;
+  padding: 0.75rem 0;
+  background: var(--bg);
+  border-top: 1px solid var(--border);
+}

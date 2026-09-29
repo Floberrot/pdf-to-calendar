@@ -80,6 +80,8 @@ Une variable à changer se modifie dans Railway, qui redéploie.
 - `app/db.py` : connexion SQLite (schéma, tables) partagée entre `log.py` et `auth.py`
 - `app/upload.py` : routes de dépôt du PDF, orchestration `locate` → `crop`,
   écrans de secours (nom à préciser, recadrage manuel)
+- `app/preview.py` : créneaux détectés présentés semaine par semaine sur la
+  prévisualisation, avec leur résumé (nombre, heures, jours à vérifier)
 - `tests/plannings.py` et `tests/test_planning_bank.py` : banque de plannings
   synthétiques (une ligne ou une colonne par personne, avec ou sans traits,
   plusieurs semaines, formats de dates et d'horaires variés) sur laquelle
