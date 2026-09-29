@@ -39,6 +39,7 @@ from app.log import log
 from app.pdf.crop import compose_crop, crop_manual, redact_name
 from app.pdf.locate import LocateResult, build_candidates, locate, normalize
 from app.pdf.render import render_pages
+from app.preview import JOURS_COURTS, format_duree, resume, semaines
 from app.settings import settings
 from app.validate import Creneau, ValidatedExtraction, ValidationError, validate
 
@@ -57,6 +58,7 @@ templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 # Fixe pour la vie du process (charge une fois au demarrage) : global Jinja
 # plutot que reinjecte dans le contexte de chaque TemplateResponse.
 templates.env.globals["llm_models"] = settings.llm_models
+templates.env.filters["duree"] = format_duree
 # Affiché par app.js sous le bouton pendant l'appel au modèle (demande
 # utilisateur : prévenir que ça peut être long, avec les replis de llm.py).
 templates.env.globals["loading_message"] = (
@@ -282,6 +284,12 @@ def _render_preview(
             "wanted_text": wanted_text,
             "profile_saved": profile_saved,
             "retry_analysis": retry_analysis,
+            # Vue par semaine et résumé (app/preview.py) : lisible même pour
+            # un mois entier, contrairement à une ligne par créneau.
+            "semaines": semaines(extraction) if extraction else None,
+            "resume": resume(extraction) if extraction else None,
+            "jours_courts": JOURS_COURTS,
+            "has_lieu": bool(extraction and any(c.lieu for c in extraction.creneaux)),
         },
     )
 

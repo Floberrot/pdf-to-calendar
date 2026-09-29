@@ -1,0 +1,34 @@
+{# Créneaux du lundi au dimanche, une ligne par semaine, comme sur un planning
+   (retour utilisateur : sur un gros import, la liste était illisible).
+   Contexte : `semaines`, `jours_courts` (app/preview.py). #}
+<div class="table-scroll">
+  <table class="week-grid">
+    <thead>
+      <tr>
+        {% for jour in jours_courts %}<th scope="col">{{ jour }}</th>{% endfor %}
+        <th scope="col">Total</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for semaine in semaines %}
+      <tr>
+        {% for jour in semaine.jours %}
+        {% if not jour.dans_periode %}
+        <td class="day is-outside"></td>
+        {% else %}
+        <td class="day{% if jour.incertain %} is-uncertain{% elif not jour.creneaux %} is-rest{% endif %}">
+          <span class="day-label">{{ jour.libelle }}</span>
+          {% for creneau in jour.creneaux %}
+          <span class="slot"><span class="slot-start">{{ creneau.debut }}</span><span class="slot-end">{{ creneau.fin }}</span></span>
+          {% if creneau.lieu %}<span class="slot-place">{{ creneau.lieu }}</span>{% endif %}
+          {% endfor %}
+          {% if jour.incertain %}<span class="slot-uncertain">« {{ jour.incertain }} »</span>{% endif %}
+        </td>
+        {% endif %}
+        {% endfor %}
+        <td class="week-total">{% if semaine.heures %}{{ semaine.heures | duree }}{% else %}—{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
