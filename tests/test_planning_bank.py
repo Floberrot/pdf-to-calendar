@@ -289,6 +289,56 @@ CASES = [
             target="Jean",
         ),
     ),
+    # Une partie seulement du nom tapée (retour utilisateur : « ne marche pas si
+    # je mets que le prénom, coupe les horaires ») : la découpe doit couvrir
+    # toute la case du nom, pas seulement le mot tapé.
+    Case("prenom_seul_tape_en_lignes", **_one(_rows(LUN_14), typed="Jean")),
+    Case("prenom_seul_tape_noms_en_colonnes", **_one(_cols(LUN_14_SLASH), typed="Jean")),
+    Case("nom_seul_tape_noms_en_colonnes", **_one(_cols(LUN_14_SLASH), typed="DUPONT")),
+    Case(
+        "prenom_seul_tape_colonnes_sans_traits",
+        **_one(_cols(LUN_14_SLASH, rules="none"), typed="Jean"),
+    ),
+    Case(
+        "prenom_seul_tape_colonnes_nom_sur_deux_lignes",
+        **_one(
+            _cols(
+                LUN_14_SLASH,
+                people=tuple((n.replace(" ", "\n"), hours(i, 7)) for i, n in enumerate(TEAM)),
+            ),
+            target="DUPONT\nJean",
+            typed="Jean",
+        ),
+    ),
+    Case(
+        "prenom_seul_tape_nom_sur_deux_lignes",
+        **_one(
+            _rows(LUN_14, people=(("DUPONT\nJean", hours(0, 7)), *team(7)[1:])),
+            target="DUPONT\nJean",
+            typed="Jean",
+        ),
+    ),
+    Case(
+        "prenom_seul_tape_nom_sur_deux_lignes_sans_traits",
+        **_one(
+            _rows(LUN_14, rules="none", people=(("DUPONT\nJean", hours(0, 7)), *team(7)[1:])),
+            target="DUPONT\nJean",
+            typed="Jean",
+        ),
+    ),
+    Case(
+        "prenom_seul_tape_nom_et_cases_sur_deux_lignes",
+        **_one(
+            _rows(
+                LUN_14,
+                people=tuple(
+                    (n.replace(" ", "\n"), _two_line_cells(i)) for i, n in enumerate(TEAM)
+                ),
+            ),
+            target="DUPONT\nJean",
+            typed="Jean",
+        ),
+    ),
     Case(
         "homonymes_dans_le_meme_tableau",
         expect="nom_homonyme",
@@ -484,4 +534,10 @@ def _check_block(
         block.name.x0 - 1, block.name.top - 1, block.name.x1 + 1, block.name.bottom + 1
     )
     assert _compact(matched_text) in _compact(target), f"nom trouvé ailleurs : {matched_text}"
-    assert set(matched_text.split()) <= _words(page, name_zone, touching=False)
+    zone = _words(page, name_zone, touching=False)
+    assert set(matched_text.split()) <= zone
+    if "|" not in target:
+        # Nom d'une seule case : elle est grisée en entier avant l'envoi au
+        # modèle, même quand seule une partie du nom a été tapée.
+        missing_name = grid.name_tokens(target) - zone
+        assert not missing_name, f"nom pas entièrement couvert : {sorted(missing_name)}"

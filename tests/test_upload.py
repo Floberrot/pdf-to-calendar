@@ -15,6 +15,7 @@ from app.db import get_pdf_name, set_pdf_name, transaction, upsert_user_seen
 from app.llm import ExtractError, ModelUnavailableError, RateLimitError
 from app.main import app
 from app.upload import ERROR_MESSAGES, get_calendar_lister, get_calendar_syncer, get_extractor
+from app.validate import _shift_years
 
 PAGE_SIZE = landscape(A4)
 
@@ -481,6 +482,66 @@ def test_retry_analysis_without_a_previous_analysis_goes_to_manual_crop(client, 
     assert retried.headers["location"] == f"/upload/{upload_id}/manual"
 
 
+def test_first_name_only_shows_the_whole_name_cell(client, tmp_path):
+    """Retour utilisateur : prénom seul tapé. La ligne trouvée affichée est la
+    case entière (« MARTIN Sophie »), pour reconnaître sa ligne."""
+    _override_user(given_name="Inconnue", family_name="PERSONNE")
+    pdf_path = tmp_path / "planning.pdf"
+    _build_planning_pdf(pdf_path)
+    upload_id = _upload_id_from(_upload(client, pdf_path).text, suffix="name")
+
+    response = client.post(f"/upload/{upload_id}/name", data={"pdf_name": "Sophie"})
+
+    assert "Ligne trouvée : <strong>MARTIN Sophie</strong>" in response.text
+    assert "a été trouvé sur le planning, pas" not in response.text
+
+
+def test_preview_says_when_the_guessed_year_was_corrected(client, tmp_path):
+    """L'en-tête ne donne pas l'année, le modèle en devine une fausse : les
+    dates sont replacées, et la prévisualisation le signale."""
+
+    def _last_year_extractor(image_png: bytes) -> dict:
+        payload = _fake_extraction_payload()
+        for key in ("debut", "fin"):
+            value = date.fromisoformat(payload["periode"][key])
+            payload["periode"][key] = _shift_years(value, -1).isoformat()
+        for creneau in payload["creneaux"]:
+            creneau["date"] = _shift_years(date.fromisoformat(creneau["date"]), -1).isoformat()
+        payload["annee_visible"] = False
+        return payload
+
+    response = _upload_with_extractor(client, tmp_path, _last_year_extractor)
+
+    assert response.status_code == 200
+    assert "09:00" in response.text
+    assert "n'est pas écrite sur le planning" in response.text
+    assert str(datetime.now(UTC).year) in response.text
+
+
+def test_validation_failure_is_logged_with_the_period_read(client, tmp_path):
+    """Pour comprendre un rejet depuis la page admin : la période lue par le
+    modèle est journalisée."""
+
+    def _written_old_year_extractor(image_png: bytes) -> dict:
+        payload = _fake_extraction_payload()
+        payload["periode"] = {"debut": "2020-01-06", "fin": "2020-01-12"}
+        payload["creneaux"] = []
+        payload["annee_visible"] = True
+        return payload
+
+    _upload_with_extractor(client, tmp_path, _written_old_year_extractor)
+
+    with transaction() as conn:
+        row = conn.execute(
+            "SELECT * FROM imports WHERE email = ? AND step = 'validation' "
+            "ORDER BY ts DESC LIMIT 1",
+            ("ami@example.com",),
+        ).fetchone()
+    assert row is not None
+    assert "periode_hors_fenetre" in row["detail"]
+    assert "2020-01-06" in row["detail"]
+
+
 def test_upload_pdf_validation_failure_shows_error_message(client, tmp_path):
     def _bad_periode_extractor(image_png: bytes) -> dict:
         today = datetime.now(UTC).date()
@@ -812,7 +873,7 @@ def test_partial_name_match_warns_before_validation(client, tmp_path):
 
     response = client.post(f"/upload/{upload_id}/name", data={"pdf_name": "Sophie INCONNUE"})
 
-    assert "Seul « Sophie » a été trouvé" in response.text
+    assert "Seul « MARTIN Sophie » a été trouvé" in response.text
     assert "vérifie sur l'image" in response.text
 
 

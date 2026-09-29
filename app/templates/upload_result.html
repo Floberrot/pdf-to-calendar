@@ -24,6 +24,12 @@
   Créneaux détectés du {{ extraction.periode_debut.strftime("%d/%m/%Y") }}
   au {{ extraction.periode_fin.strftime("%d/%m/%Y") }}
 </h2>
+{% if extraction.annee_corrigee %}
+<p class="warning">
+  L'année n'est pas écrite sur le planning : l'appli a retenu {{ extraction.annee_corrigee }},
+  celle qui place ces dates au plus près d'aujourd'hui. Vérifie-les avant de valider.
+</p>
+{% endif %}
 {% if extraction.creneaux %}
 <div class="table-scroll">
   <table>

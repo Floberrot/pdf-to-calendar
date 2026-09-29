@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import date
 
-from app.validate import ValidatedExtraction, ValidationError, validate
+from app.validate import ValidatedExtraction, ValidationError, _shift_years, validate
 
 TODAY = date(2026, 9, 14)
 
@@ -266,10 +266,68 @@ def test_validate_accepts_a_monthly_planning_that_started_weeks_ago():
 
 
 def test_validate_rejects_a_period_entirely_before_the_window():
-    """Année mal lue (2025 au lieu de 2026) : aucun recoupement, rejet."""
+    """Année écrite sur le planning mais hors fenêtre : aucun recoupement,
+    rejet (on ne corrige que les années devinées, voir plus bas)."""
     raw = _raw("2025-09-14", "2025-09-20", [])
+    raw["annee_visible"] = True
 
     result = validate(raw, validation_weeks=8, today=TODAY)
 
     assert isinstance(result, ValidationError)
     assert result.reason == "periode_hors_fenetre"
+
+
+def test_validate_fixes_a_guessed_year_when_the_year_is_not_written():
+    """Retour utilisateur : « période trop loin dans le passé » pour la semaine
+    suivante. L'en-tête écrivait « Lun 05/10 » sans année, le modèle a deviné
+    2025 : toutes les dates passent en 2026, et la prévisualisation le dit."""
+    raw = _raw(
+        "2025-10-05",
+        "2025-10-11",
+        [{"date": "2025-10-05", "debut": "09:00", "fin": "17:00", "lieu": ""}],
+        jours_incertains=[{"date": "2025-10-06", "texte": "ASTR"}],
+    )
+    raw["annee_visible"] = False
+
+    result = validate(raw, validation_weeks=8, today=date(2026, 9, 29))
+
+    assert isinstance(result, ValidatedExtraction)
+    assert (result.periode_debut, result.periode_fin) == (date(2026, 10, 5), date(2026, 10, 11))
+    assert [c.date for c in result.creneaux] == [date(2026, 10, 5)]
+    assert [j.date for j in result.jours_incertains] == [date(2026, 10, 6)]
+    assert result.annee_corrigee == 2026
+
+
+def test_validate_fixes_a_guessed_year_when_the_model_does_not_say():
+    """Sans `annee_visible` (réponse d'un modèle qui l'oublie), l'année est
+    traitée comme devinée."""
+    raw = _raw("2025-10-05", "2025-10-11", [])
+
+    result = validate(raw, validation_weeks=8, today=date(2026, 9, 29))
+
+    assert isinstance(result, ValidatedExtraction)
+    assert result.periode_debut == date(2026, 10, 5)
+
+
+def test_validate_does_not_flag_a_period_already_in_the_window():
+    raw = _raw("2026-10-05", "2026-10-11", [])
+    raw["annee_visible"] = False
+
+    result = validate(raw, validation_weeks=8, today=date(2026, 9, 29))
+
+    assert isinstance(result, ValidatedExtraction)
+    assert result.annee_corrigee is None
+
+
+def test_validate_rejects_a_period_that_no_year_can_bring_into_the_window():
+    """Mois mal lu (mars au lieu d'octobre) : aucune année ne convient."""
+    raw = _raw("2026-03-05", "2026-03-11", [])
+
+    result = validate(raw, validation_weeks=8, today=date(2026, 9, 29))
+
+    assert isinstance(result, ValidationError)
+    assert result.reason == "periode_hors_fenetre"
+
+
+def test_shift_years_keeps_the_29th_of_february_valid():
+    assert _shift_years(date(2028, 2, 29), -1) == date(2027, 2, 28)

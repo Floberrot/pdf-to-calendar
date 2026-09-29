@@ -296,6 +296,22 @@ def _log_llm_failure(request: Request, user: CurrentUser, message: str) -> None:
     )
 
 
+def _log_validation_failure(request: Request, user: CurrentUser, reason: str, raw: dict) -> None:
+    """La période lue par le modèle, pour comprendre un rejet depuis la page
+    admin (ex. une année mal devinée) : des dates, rien de personnel."""
+    log(
+        request_id=getattr(request.state, "request_id", ""),
+        email=user.email,
+        step="validation",
+        status="error",
+        detail={
+            "motif": reason,
+            "periode": raw.get("periode") if isinstance(raw, dict) else None,
+            "annee_visible": raw.get("annee_visible") if isinstance(raw, dict) else None,
+        },
+    )
+
+
 def _build_preview(
     request: Request,
     user: CurrentUser,
@@ -331,6 +347,8 @@ def _build_preview(
     try:
         raw = extractor(model_image)
         extraction = validate(raw, validation_weeks=settings.validation_weeks)
+        if isinstance(extraction, ValidationError):
+            _log_validation_failure(request, user, extraction.reason, raw)
     except RateLimitError as exc:
         logger.exception("Quota du modele atteint")
         _log_llm_failure(request, user, str(exc))
@@ -400,7 +418,9 @@ def _result_response(
         upload_id,
         upload_dir,
         buffer.getvalue(),
-        matched_text=result.matched_text,
+        # La case entière du nom (« BERROT Florian »), même si seul
+        # « Florian » a été tapé : c'est ce que la personne doit reconnaître.
+        matched_text=result.name_text or result.matched_text,
         extractor=extractor,
         calendar_lister=calendar_lister,
         wanted_text=result.candidate_used if _is_partial_match(result) else None,

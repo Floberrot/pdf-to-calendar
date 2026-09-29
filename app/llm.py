@@ -43,11 +43,14 @@ Date d'aujourd'hui : {today}.
 
 Les dates peuvent être écrites de bien des façons (« Lun 14 », « 14/09 », \
 « 14.09.26 », « 2026-09-14 », « lundi 14 septembre », « L 14 », « Mon 14 », \
-numéro seul…). Sans mois ni année visibles, prends ceux qui placent ces jours \
-au plus près d'aujourd'hui, en respectant les jours de la semaine s'ils sont \
-écrits.
+numéro seul…). Si l'année (ou le mois) n'est écrite nulle part, prends celle \
+qui place ces dates au plus près d'aujourd'hui, le plus souvent l'année en \
+cours, et vérifie que les jours de la semaine écrits tombent bien ces jours-là \
+(ex. « Lun 05/10 » : l'année où le 5 octobre est un lundi).
 
 Renvoie uniquement un objet JSON avec :
+- "annee_visible" : true si l'année est écrite quelque part dans l'image, \
+false si tu l'as déduite.
 - "periode" : {{"debut": "AAAA-MM-JJ", "fin": "AAAA-MM-JJ"}}, de la première à \
 la dernière date de l'ensemble des en-têtes (pas la plage des créneaux : un \
 jour de repos en fin de semaine doit être inclus).

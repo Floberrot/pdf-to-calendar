@@ -50,6 +50,9 @@ class ValidatedExtraction:
     periode_fin: date
     creneaux: list[Creneau]
     jours_incertains: list[JourIncertain]
+    # Année retenue quand celle devinée par le modèle a été corrigée
+    # (`_year_shift`), None sinon : à signaler sur la prévisualisation.
+    annee_corrigee: int | None = None
 
 
 @dataclass(frozen=True)
@@ -87,6 +90,22 @@ def _parse_date(value: object) -> date:
     return date.fromisoformat(text[:10])
 
 
+def _shift_years(value: date, years: int) -> date:
+    try:
+        return value.replace(year=value.year + years)
+    except ValueError:  # 29 février d'une année bissextile
+        return value.replace(year=value.year + years, day=28)
+
+
+def _year_shift(debut: date, fin: date, window_start: date, window_end: date) -> int:
+    """Nombre d'années à ajouter pour que la période recoupe la fenêtre, 0 si
+    aucun décalage d'un ou deux ans n'y suffit."""
+    for years in (1, -1, 2, -2):
+        if _shift_years(fin, years) >= window_start and _shift_years(debut, years) <= window_end:
+            return years
+    return 0
+
+
 def _creneau_duration_hours(debut: str, fin: str) -> float:
     """Durée en heures ; si fin <= début, le créneau se termine le lendemain
     (ex. 21:00-07:00 = 10h)."""
@@ -120,13 +139,24 @@ def validate(
     # semaines avant aujourd'hui sans être faux pour autant.
     window_start = today - timedelta(weeks=2)
     window_end = today + timedelta(weeks=validation_weeks)
+    year_shift = 0
     if periode_fin < window_start or periode_debut > window_end:
-        return ValidationError("periode_hors_fenetre")
+        # Retour utilisateur : « période trop loin dans le passé » pour la
+        # semaine suivante. L'en-tête écrivait « Lun 05/10 », sans année, et le
+        # modèle en a deviné une mauvaise. Quand l'année n'est pas écrite, celle
+        # qui place la période dans la fenêtre est la bonne ; une année écrite
+        # hors fenêtre reste, elle, rejetée.
+        if raw.get("annee_visible") is not True:
+            year_shift = _year_shift(periode_debut, periode_fin, window_start, window_end)
+        if not year_shift:
+            return ValidationError("periode_hors_fenetre")
+        periode_debut = _shift_years(periode_debut, year_shift)
+        periode_fin = _shift_years(periode_fin, year_shift)
 
     creneaux: list[Creneau] = []
     for raw_creneau in raw.get("creneaux") or []:
         try:
-            creneau_date = _parse_date(raw_creneau["date"])
+            creneau_date = _shift_years(_parse_date(raw_creneau["date"]), year_shift)
             debut = _normalize_heure(raw_creneau["debut"])
             fin = _normalize_heure(raw_creneau["fin"])
         except (KeyError, ValueError, TypeError):
@@ -160,7 +190,7 @@ def validate(
     jours_incertains: list[JourIncertain] = []
     for raw_jour in raw.get("jours_incertains") or []:
         try:
-            jour_date = _parse_date(raw_jour["date"])
+            jour_date = _shift_years(_parse_date(raw_jour["date"]), year_shift)
         except (KeyError, ValueError, TypeError):
             continue
         if periode_debut <= jour_date <= periode_fin and jour_date not in creneau_dates:
@@ -173,4 +203,5 @@ def validate(
         periode_fin=periode_fin,
         creneaux=creneaux,
         jours_incertains=jours_incertains,
+        annee_corrigee=periode_debut.year if year_shift else None,
     )
