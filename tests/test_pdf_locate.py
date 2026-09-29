@@ -424,3 +424,67 @@ def test_locate_matches_words_glued_together_by_pdfplumber(tmp_path):
 
     assert isinstance(result, LocateResult)
     assert result.matched_text == "DUPONTJean"
+
+
+def _build_tight_planning_pdf(path: Path, rows: list[tuple[str, str]], *, row_gap: float) -> None:
+    """Tableau serré, sans aucun trait : une espace entre le nom et la
+    première case d'horaires, `row_gap` points entre deux lignes."""
+    c = canvas.Canvas(str(path), pagesize=PAGE_SIZE)
+    c.setFont("Helvetica", 9)
+    top = PAGE_SIZE[1] - 60
+    c.drawString(LEFT, top, "Nom Lun 15 Mar 16 Mer 17 Jeu 18 Ven 19")
+    y = top - 9 - row_gap
+    for name, cells in rows:
+        c.drawString(LEFT, y, f"{name} {cells}")
+        y -= 9 + row_gap
+    c.showPage()
+    c.save()
+
+
+def _words_inside(pdf_path: Path, rect) -> set[str]:
+    import pdfplumber
+
+    with pdfplumber.open(pdf_path) as pdf:
+        page = pdf.pages[0]
+        bbox = (rect.x0, rect.top, rect.x1, rect.bottom)
+        return {w["text"] for w in page.crop(bbox).extract_words()}
+
+
+def test_first_name_only_never_takes_the_next_hours_cell_as_the_name(tmp_path):
+    """La case du nom s'élargit aux mots collés par une espace (« DUPONT »
+    pour « Jean » tapé seul), mais jamais à un mot avec un chiffre : la case
+    d'horaires voisine serait grisée avant l'envoi au modèle."""
+    pdf_path = tmp_path / "planning.pdf"
+    _build_tight_planning_pdf(
+        pdf_path, [("DUPONT Jean", "7h-15h 7h-15h 7h-15h 7h-15h 7h-15h")], row_gap=12
+    )
+
+    result = locate(str(pdf_path), candidates=["Jean"])
+
+    assert isinstance(result, LocateResult)
+    assert result.name_text == "DUPONT Jean"
+    name_zone = _words_inside(pdf_path, result.blocks[0].name)
+    assert {"DUPONT", "Jean"} <= name_zone
+    assert "7h-15h" not in name_zone
+
+
+def test_first_name_only_in_tight_rows_without_rules_keeps_neighbours_out(tmp_path):
+    """Lignes serrées sans traits : la ligne voisine, qui a ses propres
+    horaires, n'est jamais prise pour la suite du nom."""
+    pdf_path = tmp_path / "planning.pdf"
+    _build_tight_planning_pdf(
+        pdf_path,
+        [
+            ("MARTIN Sophie", "8h-16h 8h-16h 8h-16h 8h-16h 8h-16h"),
+            ("DUPONT Jean", "7h-15h 7h-15h 7h-15h 7h-15h 7h-15h"),
+            ("BERNARD Paul", "9h-17h 9h-17h 9h-17h 9h-17h 9h-17h"),
+        ],
+        row_gap=2,
+    )
+
+    result = locate(str(pdf_path), candidates=["Jean"])
+
+    assert isinstance(result, LocateResult)
+    line = _words_inside(pdf_path, result.blocks[0].line)
+    assert "7h-15h" in line
+    assert not {"8h-16h", "9h-17h", "MARTIN", "BERNARD"} & line

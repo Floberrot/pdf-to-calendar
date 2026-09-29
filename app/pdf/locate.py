@@ -48,6 +48,10 @@ StackedNameGapRatio = 0.8
 # Blanc maximal entre deux lignes d'une même case (horaires sur deux lignes),
 # en hauteur de texte ; au-delà, c'est la ligne suivante du tableau.
 CellLineGapRatio = 0.5
+# Blanc maximal entre deux mots d'une même case, en hauteur de texte : une
+# espace en fait de 0,25 à 0,35 selon la police ; entre deux cases, il y a au
+# moins leurs deux marges intérieures.
+CellWordGapRatio = 0.4
 # Part minimale de la largeur (ou hauteur) du tableau qu'un trait doit couvrir
 # pour séparer deux lignes (ou colonnes).
 RuleCoverage = 0.6
@@ -91,7 +95,8 @@ class Block:
     dates au-dessus, `line` la ligne de la personne, sur la même largeur.
     `"columns"` (une colonne par personne) : `header` est la colonne des dates
     à gauche, `line` la colonne de la personne, sur la même hauteur. `name` :
-    zone du nom dans `line`, grisée avant l'envoi au modèle (crop.py)."""
+    la case du nom dans `line`, en entier même si seule une partie du nom a
+    été tapée ; grisée avant l'envoi au modèle (crop.py)."""
 
     page_index: int
     orientation: Orientation
@@ -108,6 +113,9 @@ class LocateResult:
     blocks: tuple[Block, ...]
     matched_text: str
     candidate_used: str
+    # Texte de la case du nom (« BERROT Florian » quand seul « Florian » a été
+    # tapé) : ce qui est montré à la personne pour vérifier la ligne.
+    name_text: str = ""
 
 
 @dataclass(frozen=True)
@@ -721,20 +729,107 @@ def _clamp(page: _Page, rect: Rect) -> Rect:
     )
 
 
+def _same_line(a: _Box, b: _Box) -> bool:
+    return _y_overlap(a, b.top, b.bottom) >= 0.5 * min(a.bottom - a.top, b.bottom - b.top)
+
+
+def _rule_between(rules: Iterable[float], a: _Box, b: _Box) -> bool:
+    low, high = sorted((a.x1, b.x0) if a.x1 <= b.x0 else (b.x1, a.x0))
+    return any(low - 0.5 < x < high + 0.5 for x in rules)
+
+
+def _name_cell(page: _Page, name: Rect) -> Rect:
+    """La case du nom en entier, au-delà des mots qui ont matché.
+
+    Retour utilisateur : « ne marche pas si je mets que le prénom, coupe les
+    horaires ». Tapé seul, « Florian » ne couvre qu'un mot de la case
+    « BERROT Florian » ; la colonne découpée se réduisait à ce mot, alors que
+    les horaires sont alignés sous le début de la case. Sont ajoutés les mots
+    de la même ligne collés au nom par un blanc d'une espace, sans trait
+    vertical entre eux, et sans chiffre : dans un tableau serré, la case
+    d'horaires voisine (« 7h-15h ») ne doit jamais être prise pour le nom, elle
+    serait grisée avant l'envoi au modèle."""
+    line_words = [w for w in page.words if _same_line(w, name)]
+    cell = [w for w in line_words if _inside(w, name)]
+    rules = [r.x0 for r in page.v_rules if r.top <= name.top + 1 and r.bottom >= name.bottom - 1]
+    limit = CellWordGapRatio * page.text_height
+    grown = True
+    while grown:
+        grown = False
+        for word in line_words:
+            if word in cell or any(ch.isdigit() for ch in word.text):
+                continue
+            if any(
+                _same_line(word, c)
+                and max(word.x0 - c.x1, c.x0 - word.x1) <= limit
+                and not _rule_between(rules, c, word)
+                for c in cell
+            ):
+                cell.append(word)
+                grown = True
+    return _bbox([name, *cell])
+
+
+def _row_name_cell(page: _Page, cell: Rect, header_bottom: float) -> Rect:
+    """Ajoute à la case du nom sa deuxième ligne (« DUPONT » puis « Jean »),
+    quand un seul des deux mots a été tapé : sans elle, la ligne voisine
+    passait pour celle d'une autre personne et ses horaires étaient coupés.
+
+    Une ligne voisine dans la colonne du nom en fait partie si aucun trait ne
+    les sépare, si elles sont à moins d'un interligne, et si l'une des deux ne
+    contient que le nom — ou si des traits proches encadrent les deux, comme
+    dans une grille. Sans cette dernière condition, deux personnes sur des
+    lignes serrées et sans traits seraient confondues."""
+    gap_limit = CellLineGapRatio * page.text_height
+
+    def column_rules() -> list[float]:
+        return [r.top for r in page.h_rules if r.x0 <= cell.x0 + 1 and r.x1 >= cell.x1 - 1]
+
+    def only_name(lines: Iterable[_Line], box: Rect) -> bool:
+        return all(_x_overlap(w, box.x0, box.x1) > 0 for line in lines for w in line.words)
+
+    grown = True
+    while grown:
+        grown = False
+        own_lines = [line for line in page.lines if _y_overlap(line, cell.top, cell.bottom) > 0]
+        for line in page.lines:
+            if line in own_lines or line.top < header_bottom - 0.5:
+                continue
+            in_column = [w for w in line.words if _x_overlap(w, cell.x0, cell.x1) > 0]
+            gap = max(line.top - cell.bottom, cell.top - line.bottom)
+            if not in_column or gap > gap_limit:
+                continue
+            union = _bbox([cell, *in_column])
+            rules = column_rules()
+            low, high = sorted((line.top, cell.top))
+            if any(
+                low + 0.5 < y < high - 0.5 and not (cell.top <= y <= cell.bottom) for y in rules
+            ):
+                continue
+            ruled = any(union.top - MaxPad <= y <= union.top + 0.5 for y in rules) and any(
+                union.bottom - 0.5 <= y <= union.bottom + MaxPad for y in rules
+            )
+            if ruled or only_name([line], cell) or only_name(own_lines, cell):
+                cell = union
+                grown = True
+                break
+    return cell
+
+
 def _rows_block(page: _Page, run: _Run, match: _NameMatch) -> Block:
     """Une ligne par personne : en-tête de dates au-dessus, ligne du nom."""
-    name = match.rect
     gap = CellLineGapRatio * page.text_height
     header_box = run.rect
-    span_x0, span_x1 = min(name.x0, header_box.x0), max(name.x1, header_box.x1)
 
     header_top, header_bottom, header_words = _cluster(
         page.lines,
         header_box.top,
         header_box.bottom,
         gap,
-        lambda line: line.bottom <= name.top + 0.5,
+        lambda line: line.bottom <= match.rect.top + 0.5,
     )
+    name = _row_name_cell(page, match.rect, header_bottom)
+    span_x0, span_x1 = min(name.x0, header_box.x0), max(name.x1, header_box.x1)
 
     def same_row(line: _Line) -> bool:
         # Une autre personne dans la colonne des noms : ligne suivante.
@@ -779,7 +874,7 @@ def _columns_block(page: _Page, run: _Run, match: _NameMatch) -> Block:
         return _x_overlap(word, label_x0, label_x1) > 0
 
     # Rangée des noms, au-dessus de la première date.
-    names_top, _, _ = _cluster(
+    names_top, names_bottom, _ = _cluster(
         page.lines,
         name.top,
         name.bottom,
@@ -817,12 +912,15 @@ def _columns_block(page: _Page, run: _Run, match: _NameMatch) -> Block:
     line_x0, line_x1 = _horizontal_bounds(
         page, column_x0, column_x1, top, bottom, set(column_words)
     )
+    # Toute la case du nom est grisée, pas seulement le mot tapé : un nom sur
+    # deux lignes (« DUPONT » puis « Jean ») y tient en entier.
+    names_row_bottom = min(names_bottom + Pad, (names_bottom + first.top) / 2)
     return Block(
         page_index=page.index,
         orientation="columns",
         header=_clamp(page, Rect(header_x0, top, header_x1, bottom)),
         line=_clamp(page, Rect(line_x0, top, line_x1, bottom)),
-        name=name,
+        name=_clamp(page, Rect(line_x0, top, line_x1, names_row_bottom)),
     )
 
 
@@ -887,8 +985,9 @@ def locate(
     matches, candidate_used = found
 
     located: list[tuple[_NameMatch, _Run, Block]] = []
-    for match in matches:
-        page = pages[match.page_index]
+    for found_match in matches:
+        page = pages[found_match.page_index]
+        match = _NameMatch(page.index, _name_cell(page, found_match.rect), found_match.text)
         run = _header_run(page, match)
         if run is None:
             # Nom hors d'un tableau daté (titre, légende…) : ignoré s'il
@@ -906,6 +1005,16 @@ def locate(
     blocks = sorted(
         (block for _, _, block in located), key=lambda b: (b.page_index, b.line.top, b.line.x0)
     )
+    first = blocks[0]
     return LocateResult(
-        blocks=tuple(blocks), matched_text=located[0][0].text, candidate_used=candidate_used
+        blocks=tuple(blocks),
+        matched_text=located[0][0].text,
+        candidate_used=candidate_used,
+        name_text=_text_inside(pages[first.page_index], first.name),
     )
+
+
+def _text_inside(page: _Page, rect: Rect) -> str:
+    """Les mots d'une zone, dans l'ordre de lecture."""
+    words = [w for w in page.words if _inside(w, rect, tolerance=1.0)]
+    return " ".join(w.text for line in _group_lines(words) for w in line.words)

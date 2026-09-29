@@ -481,6 +481,20 @@ def test_retry_analysis_without_a_previous_analysis_goes_to_manual_crop(client, 
     assert retried.headers["location"] == f"/upload/{upload_id}/manual"
 
 
+def test_first_name_only_shows_the_whole_name_cell(client, tmp_path):
+    """Retour utilisateur : prénom seul tapé. La ligne trouvée affichée est la
+    case entière (« MARTIN Sophie »), pour reconnaître sa ligne."""
+    _override_user(given_name="Inconnue", family_name="PERSONNE")
+    pdf_path = tmp_path / "planning.pdf"
+    _build_planning_pdf(pdf_path)
+    upload_id = _upload_id_from(_upload(client, pdf_path).text, suffix="name")
+
+    response = client.post(f"/upload/{upload_id}/name", data={"pdf_name": "Sophie"})
+
+    assert "Ligne trouvée : <strong>MARTIN Sophie</strong>" in response.text
+    assert "a été trouvé sur le planning, pas" not in response.text
+
+
 def test_upload_pdf_validation_failure_shows_error_message(client, tmp_path):
     def _bad_periode_extractor(image_png: bytes) -> dict:
         today = datetime.now(UTC).date()
@@ -812,7 +826,7 @@ def test_partial_name_match_warns_before_validation(client, tmp_path):
 
     response = client.post(f"/upload/{upload_id}/name", data={"pdf_name": "Sophie INCONNUE"})
 
-    assert "Seul « Sophie » a été trouvé" in response.text
+    assert "Seul « MARTIN Sophie » a été trouvé" in response.text
     assert "vérifie sur l'image" in response.text
 
 

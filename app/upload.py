@@ -400,7 +400,9 @@ def _result_response(
         upload_id,
         upload_dir,
         buffer.getvalue(),
-        matched_text=result.matched_text,
+        # La case entière du nom (« BERROT Florian »), même si seul
+        # « Florian » a été tapé : c'est ce que la personne doit reconnaître.
+        matched_text=result.name_text or result.matched_text,
         extractor=extractor,
         calendar_lister=calendar_lister,
         wanted_text=result.candidate_used if _is_partial_match(result) else None,
